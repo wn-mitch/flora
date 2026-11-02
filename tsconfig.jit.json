@@ -1,0 +1,38 @@
+{
+  "//": "The engine and its tests as Lua JIT; just build-lua.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": [
+      "ES2022"
+    ],
+    "strict": true,
+    "rewriteRelativeImportExtensions": true,
+    "skipLibCheck": true,
+    "types": [],
+    "rootDir": ".",
+    "outDir": "build/jit",
+    "customConditions": [
+      "flora-lua"
+    ]
+  },
+  "include": [
+    "src/engine",
+    "tests/engine",
+    "lua/platform.d.ts"
+  ],
+  "tstl": {
+    "luaTarget": "JIT",
+    "noImplicitSelf": true,
+    "noHeader": true,
+    "luaPlugins": [
+      {
+        "name": "./tools/tstl-platform.cjs"
+      }
+    ]
+  },
+  "exclude": [
+    "src/engine/platform.ts"
+  ]
+}

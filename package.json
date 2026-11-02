@@ -5,17 +5,25 @@
   "description": "Procedural watercolour flora: display lists and their renderers",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./engine": "./src/engine/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.ts",
+    "test": "node --test tests/*.test.ts && node tests/engine/run.ts",
     "test:browser": "node tests/browser.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",
     "esbuild": "0.25.12",
     "playwright-core": "1.64.1",
-    "typescript": "5.9.3"
+    "typescript": "6.0.2",
+    "typescript-to-lua": "1.37.1"
+  },
+  "imports": {
+    "#platform": {
+      "flora-lua": "./lua/platform.d.ts",
+      "default": "./src/engine/platform.ts"
+    }
   }
 }
