@@ -1,7 +1,7 @@
 {
   "name": "@alpaca-software/web-flora",
-  "version": "0.1.0",
-  "description": "Procedural watercolour flora for web pages: grows the plants of the tikz-flora LuaLaTeX package and draws them with WebGL2 or a 2D canvas",
+  "version": "0.1.1",
+  "description": "Procedural watercolour plants for web pages: grows them around your text and draws them with WebGL2 or a 2D canvas",
   "keywords": [
     "watercolour",
     "flora",
@@ -9,7 +9,8 @@
     "procedural",
     "webgl",
     "canvas",
-    "tikz-flora"
+    "botanical",
+    "illustration"
   ],
   "license": "MIT",
   "author": "Alpaca Software",
