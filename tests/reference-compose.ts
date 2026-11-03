@@ -77,3 +77,26 @@ for (const [name, spec] of PAGES) {
     if not ok then error(pt) end
     return {blocks(pt:numbers()), pt.coverage, pt.counts} end)()`, 1e-9);
 }
+
+// The page's progress (o.progress; compose.lua's spec.progress): the same
+// rising list of values, ending in 1, sent at the same points.
+for (const [name, spec] of PAGES) {
+  const H = spec.height;
+  add(`compose progress ${name}`, () => {
+    const pt = CO.painterFor(spec);
+    pt.flatGilt = true;
+    const sent: number[] = [];
+    CO.page(spec, { painter: pt, progress: (f) => sent.push(f) });
+    return sent;
+  }, `(function()
+    local CO = require("flora.compose")
+    local new = PAINT.new
+    PAINT.new = function() return MOCK(${H}) end
+    local spec = ${lit(spec)}
+    local sent = {}
+    spec.progress = function(f) sent[#sent + 1] = f end
+    local ok, err = pcall(CO.page, spec)
+    PAINT.new = new
+    if not ok then error(err) end
+    return sent end)()`, 1e-9);
+}
