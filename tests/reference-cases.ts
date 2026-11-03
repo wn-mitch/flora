@@ -12,6 +12,8 @@ import * as BR from "../src/engine/brush.ts";
 import * as LF from "../src/engine/leaf.ts";
 import * as O from "../src/engine/ornament.ts";
 import * as RL from "../src/engine/orn_relief.ts";
+import * as RN from "../src/engine/orn_roundel.ts";
+import * as SC from "../src/engine/orn_scroll.ts";
 import * as ORN from "../src/engine/ornaments.ts";
 import { PAL, Painter } from "../src/engine/paint.ts";
 import { PLANT } from "../src/engine/tune.ts";
@@ -345,11 +347,39 @@ for (const seed of ["p1", "p2", "p3", "p4"]) {
     `O.pendant(pt, R.new(${lit(seed)}), 60, 60, 24, 34, ${seed === "p1" ? 0 : 14})`);
 }
 // Every registered kind, through the registry.
-for (const k of ["cartouche", "header", "pendant", "gilt"].flatMap((slot) => ORN.of(slot))) {
+for (const k of ["cartouche", "header", "pendant", "crest", "flourish", "tailpiece", "corner", "gilt"].flatMap((slot) => ORN.of(slot))) {
   const box = [100, 100, 160, 180] as const;
   scene(`paint ornament ${k.name}`, (pt) => ORN.draw(k, pt, new Rng(k.name), box, { cord: 10 }),
     `ORN.draw(${lit(k.name)}, pt, R.new(${lit(k.name)}), ${lit(box)}, { cord = 10 })`);
 }
+// Kinds again in their slots' usual shapes, with other seeds so the
+// random branches (vignettes, zodiac signs, curl sides) differ, and the
+// corners mirrored into each corner. A pendant without a cord paints none.
+for (const slot of ["cartouche", "header", "pendant", "crest", "flourish", "tailpiece", "corner"]) {
+  const aspect = ORN.SLOTS[slot].aspect;
+  const h = aspect > 2 ? 30 : 80, box = [40, 60, 40 + h * aspect, 60 + h] as const;
+  for (const k of ORN.of(slot)) {
+    for (const [i, seed] of ["a", "b", "c"].entries()) {
+      const flip = [[1, 1], [-1, 1], [1, -1]][i] as [number, number];
+      scene(`paint ornament ${k.name} ${seed}`, (pt) => ORN.draw(k, pt, new Rng(seed), box, { flip, ...(i === 0 ? {} : { cord: 12 + i }) }),
+        `ORN.draw(${lit(k.name)}, pt, R.new(${lit(seed)}), ${lit(box)}, { flip = ${lit(flip)}${i === 0 ? "" : `, cord = ${12 + i}`} })`);
+    }
+  }
+}
+// The shared shapes the pieces use from the roundels and scrolls.
+scene("paint rosette", (pt) => { RN.rosette(pt, 60, 60, 20, 6); RN.rosette(pt, 150, 150, 12, 8, 0.3); },
+  "local RN = require(\"flora.orn_roundel\"); RN.rosette(pt, 60, 60, 20, 6); RN.rosette(pt, 150, 150, 12, 8, 0.3)");
+scene("paint quatrefoil", (pt) => pt.strokeMany([RN.quatrefoil(80, 80, 30), RN.quatrefoil(200, 200, 20, 0.4)], PAL.gold, 0.4, 0.9),
+  "local RN = require(\"flora.orn_roundel\"); pt:stroke({ RN.quatrefoil(80, 80, 30), RN.quatrefoil(200, 200, 20, 0.4) }, PAINT.palette.gold, 0.4, 0.9, { many = true })");
+scene("paint zodiac", (pt) => { RN.zodiac(pt, 100, 100, 40); RN.zodiac(pt, 220, 220, 30, new Rng("zw")); },
+  "local RN = require(\"flora.orn_roundel\"); RN.zodiac(pt, 100, 100, 40); RN.zodiac(pt, 220, 220, 30, R.new(\"zw\"))");
+// Seeds that pick each of the sun, moon, rosette and star.
+for (const seed of ["v1", "v3", "v15", "v18"]) {
+  scene(`paint vignette ${seed}`, (pt) => { SC.vignette(pt, new Rng(seed), 100, 100, 20); },
+    `local SC = require("flora.orn_scroll"); SC.vignette(pt, R.new(${lit(seed)}), 100, 100, 20)`);
+}
+scene("paint scroll", (pt) => { SC.scroll(pt, [50, 50], 0.3, 40, 1, 3); SC.scroll(pt, [200, 100], 2, 30, -1, 2); },
+  "local SC = require(\"flora.orn_scroll\"); SC.scroll(pt, {50, 50}, 0.3, 40, 1, 3); SC.scroll(pt, {200, 100}, 2, 30, -1, 2)");
 // The flora, painted.
 scene("paint leaf", (pt) => { const r = new Rng("leaf"); LF.leaf(pt, r, 120, 40, 1.3, LF.options(r, 110, 1.3)); },
   "local r = R.new(\"leaf\"); LF.leaf(pt, r, 120, 40, 1.3, LF.options(r, 110, 1.3))");

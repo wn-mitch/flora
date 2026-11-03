@@ -2,8 +2,12 @@
 // so), and drawing a kind with its gold gilt. To add a kind, register it
 // from a module's register function and call that here.
 import { GILDER } from "./orn_gild.ts";
+import { registerCelestial } from "./orn_celestial.ts";
 import { registerClassic } from "./orn_classic.ts";
 import { registerGilt } from "./orn_gilt.ts";
+import { registerPieces } from "./orn_pieces.ts";
+import { registerRoundel } from "./orn_roundel.ts";
+import { registerScroll } from "./orn_scroll.ts";
 import { kind as byName, type Box, type OrnamentKind, type SlotOptions } from "./orn_registry.ts";
 import type { Painter } from "./paint.ts";
 import type { Rng } from "./rng.ts";
@@ -17,6 +21,10 @@ export function registerAll(): void {
   if (ready) return;
   ready = true;
   registerClassic();
+  registerCelestial();
+  registerScroll();
+  registerRoundel();
+  registerPieces();
   registerGilt();
 }
 
