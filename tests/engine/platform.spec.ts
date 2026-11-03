@@ -1,7 +1,7 @@
 // The platform's answers on every target: the edges of 32-bit arithmetic
 // where JavaScript, Lua 5.3 and LuaJIT disagree natively, and formatting.
-import { add32, and32, fmt, hypot, mod, mul32, or32, shl32, shr32, xor32 } from "#platform";
-import { eq, near, test, throws } from "./harness.ts";
+import { add32, and32, fmt, hypot, mod, mul32, or32, shl32, shr32, sortedKeys, sortNumbers, utf8, xor32 } from "#platform";
+import { eq, eqList, near, test, throws } from "./harness.ts";
 
 const TOP = 4294967295; // 2^32 - 1
 
@@ -65,4 +65,23 @@ test("fmt refuses what it cannot write alike everywhere", () => {
 test("hypot", () => {
   eq(hypot(3, 4), 5, "3, 4");
   eq(hypot(-5, 12), 13, "-5, 12");
+});
+
+test("sortedKeys orders keys bytewise, whatever order they were made in", () => {
+  const k = sortedKeys({ zeta: 1, Alpha: 2, beta: 3, alpha: 4, "a-b": 5 });
+  eq(k.length, 5, "count");
+  eq(k.join(","), "Alpha,a-b,alpha,beta,zeta", "order");
+  eq(sortedKeys({}).length, 0, "no keys");
+});
+
+test("sortNumbers sorts numerically, not as text", () => {
+  const xs = [10, -2.5, 3, 100, 0, -40];
+  sortNumbers(xs);
+  eqList(xs, [-40, -2.5, 0, 3, 10, 100], "order");
+});
+
+test("utf8 gives bytes, not UTF-16 units", () => {
+  eqList(utf8("ab"), [97, 98], "ASCII");
+  eqList(utf8("é"), [195, 169], "two-byte");
+  eqList(utf8("\u{1F33C}"), [240, 159, 140, 188], "a blossom, astral");
 });

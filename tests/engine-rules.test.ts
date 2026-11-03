@@ -24,7 +24,7 @@ if (!config) throw new Error("tsconfig.json did not parse");
 const program = ts.createProgram([...ENGINE, FIXTURE, PLATFORM, join(ROOT, "lua/platform.d.ts")], config.options);
 const checker = program.getTypeChecker();
 
-type Rule = "bitwise" | "mod" | "regex" | "number-to-string" | "order" | "typed-array" | "host";
+type Rule = "bitwise" | "mod" | "regex" | "number-to-string" | "order" | "typed-array" | "host" | "hole";
 interface Violation { rule: Rule; line: number; text: string }
 
 const BITWISE = new Set([
@@ -36,6 +36,18 @@ const BITWISE = new Set([
 const TYPED = /^(Float32|Float64|Int8|Int16|Int32|Uint8|Uint8Clamped|Uint16|Uint32|BigInt64|BigUint64)Array$/;
 
 const isNumber = (e: ts.Expression) => (checker.getTypeAtLocation(e).flags & ts.TypeFlags.NumberLike) !== 0;
+const isNumberArray = (e: ts.Expression) => {
+  const t = checker.getTypeAtLocation(e);
+  const el = checker.isArrayType(t) ? checker.getTypeArguments(t as ts.TypeReference)[0] : undefined;
+  return el !== undefined && (el.flags & ts.TypeFlags.NumberLike) !== 0;
+};
+// May the expression be undefined (or null)? A Lua table cannot hold nil, so
+// such a value would leave a hole in an array.
+const mayBeNil = (e: ts.Expression) => {
+  const t = checker.getTypeAtLocation(e);
+  const parts = t.isUnion() ? t.types : [t];
+  return parts.some((p) => (p.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Void | ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0);
+};
 const isString = (e: ts.Expression) => (checker.getTypeAtLocation(e).flags & ts.TypeFlags.StringLike) !== 0;
 
 // Each construct in `file` that breaks a rule.
@@ -51,6 +63,8 @@ function violations(file: string): Violation[] {
       if (BITWISE.has(op)) add("bitwise", node);
       if (op === ts.SyntaxKind.PercentToken || op === ts.SyntaxKind.PercentEqualsToken) add("mod", node);
       if (op === ts.SyntaxKind.PlusToken && ((isString(node.left) && isNumber(node.right)) || (isNumber(node.left) && isString(node.right)))) add("number-to-string", node);
+    } else if (ts.isArrayLiteralExpression(node)) {
+      for (const el of node.elements) if (!ts.isSpreadElement(el) && !ts.isOmittedExpression(el) && mayBeNil(el)) add("hole", el);
     } else if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.TildeToken) {
       add("bitwise", node);
     } else if (node.kind === ts.SyntaxKind.RegularExpressionLiteral) {
@@ -70,6 +84,10 @@ function violations(file: string): Violation[] {
         if (["toString", "toFixed", "toPrecision", "toExponential"].includes(name) && isNumber(callee.expression)) add("number-to-string", node);
         if (on === "Object" && ["keys", "values", "entries"].includes(name)) add("order", node);
         if (name === "sort") add("order", node);
+        if ((name === "push" || name === "unshift") && checker.isArrayType(checker.getTypeAtLocation(callee.expression))) {
+          for (const a of node.arguments ?? []) if (mayBeNil(a)) add("hole", a);
+        }
+        if (name === "join" && isNumberArray(callee.expression)) add("number-to-string", node);
         if ((on === "Math" && name === "random") || on === "Date") add("host", node);
       }
     }
@@ -83,7 +101,7 @@ test("each rule fires on the fixture's constructs, line by line", () => {
   const sf = program.getSourceFile(FIXTURE)!;
   const want = new Map<number, Rule>();
   sf.text.split("\n").forEach((line, i) => {
-    const tag = line.match(/\/\/ (bitwise|mod|regex|number-to-string|order|typed-array|host)$/);
+    const tag = line.match(/\/\/ (bitwise|mod|regex|number-to-string|order|typed-array|host|hole)$/);
     if (tag) want.set(i + 1, tag[1] as Rule);
   });
   assert.ok(want.size >= 25, `the fixture tags only ${want.size} lines`);

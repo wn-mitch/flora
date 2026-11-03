@@ -17,6 +17,14 @@ export function eq(got: number | string | boolean, want: number | string | boole
   if (got !== want) throw new Error(`${what}: got ${show(got)}, want ${show(want)}`);
 }
 
+// Equal lengths and equal numbers, place by place.
+export function eqList(got: readonly number[], want: readonly number[], what: string): void {
+  if (got.length !== want.length) throw new Error(`${what}: ${fmt(got.length, 0)} items, want ${fmt(want.length, 0)}`);
+  for (let i = 0; i < want.length; i++) {
+    if (got[i] !== want[i]) throw new Error(`${what}: item ${fmt(i, 0)} is ${show(got[i])}, want ${show(want[i])}`);
+  }
+}
+
 // |got - want| <= tol.
 export function near(got: number, want: number, tol: number, what: string): void {
   if (!(Math.abs(got - want) <= tol)) throw new Error(`${what}: got ${fmt(got, 12)}, want ${fmt(want, 12)} within ${fmt(tol, 12)}`);

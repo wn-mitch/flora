@@ -52,6 +52,24 @@ export function fmt(x: number, digits: number): string {
   return /^-[0.]+$/.test(s) ? s.slice(1) : s;
 }
 
+// The keys of `o`, sorted by their UTF-16 code units, which for ASCII keys
+// is Lua's byte order. Iteration order over a Lua table is unspecified, so
+// engine code reaches keys only through this.
+export function sortedKeys(o: Readonly<Record<string, unknown>>): string[] {
+  return Object.keys(o).sort();
+}
+
+// Sorts `xs` ascending in place. Lua's table.sort is not stable, which for
+// numbers changes nothing.
+export function sortNumbers(xs: number[]): void {
+  xs.sort((a, b) => a - b);
+}
+
+// The UTF-8 bytes of `s`.
+export function utf8(s: string): number[] {
+  return [...new TextEncoder().encode(s)];
+}
+
 // The square root of x^2 + y^2 (TypeScriptToLua lacks Math.hypot).
 export function hypot(x: number, y: number): number {
   return Math.sqrt(x * x + y * y);

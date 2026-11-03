@@ -2,6 +2,8 @@
 // one per line, each tagged with the rule it breaks. Not engine code
 // itself: the rules test reads it to prove it can fail.
 const n = 3, s = "a", o: Record<string, number> = { a: 1 };
+const maybe = (): number | undefined => (n > 2 ? 1 : undefined);
+const holes: (number | undefined)[] = [];
 let m = 5;
 export const cases = [
   n & 1, // bitwise
@@ -20,6 +22,7 @@ export const cases = [
   s + n, // number-to-string
   n + s, // number-to-string
   String(n), // number-to-string
+  [n, 2].join(","), // number-to-string
   n.toString(), // number-to-string
   n.toFixed(2), // number-to-string
   Object.keys(o), // order
@@ -30,3 +33,5 @@ export const cases = [
   Date.now(), // host
 ];
 for (const k in o) cases.push(o[k]); // order
+holes.push(maybe()); // hole
+export const gap = [1, maybe()]; // hole

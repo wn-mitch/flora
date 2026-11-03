@@ -39,6 +39,15 @@ function M.fmt(x, digits)
   return s
 end
 
+function M.sortedKeys(o)
+  local keys = {}
+  for k in pairs(o) do keys[#keys + 1] = k end
+  table.sort(keys)
+  return keys
+end
+function M.sortNumbers(xs) table.sort(xs) end
+function M.utf8(s) return { s:byte(1, -1) } end
+
 function M.hypot(x, y) return math.sqrt(x * x + y * y) end
 
 function M.out(line) io.write(line, "\n") end
