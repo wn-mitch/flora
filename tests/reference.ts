@@ -43,6 +43,8 @@ D = require("flora.dist")
 SP = require("flora.sprig")
 TU = require("flora.tune")
 LA = require("flora.layout")
+GR = require("flora.grow")
+MX = require("flora.mix")
 NULL = setmetatable({}, { __tostring = function() return "null" end })
 -- n draws of method m (with args) from stream r.
 function draws(r, n, m, ...)

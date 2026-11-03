@@ -7,6 +7,7 @@ import "./leaf.spec.ts";
 import "./flower.spec.ts";
 import "./sprig.spec.ts";
 import "./plant.spec.ts";
+import "./grow.spec.ts";
 
 declare const _VERSION: string | undefined;
 // In Lua, _VERSION names the interpreter ("Lua 5.3", "Lua 5.1" for LuaJIT).

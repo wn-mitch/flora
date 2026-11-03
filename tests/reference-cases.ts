@@ -5,7 +5,9 @@
 import * as C from "../src/engine/color.ts";
 import * as D from "../src/engine/dist.ts";
 import * as F from "../src/engine/flower.ts";
+import * as GR from "../src/engine/grow.ts";
 import * as LA from "../src/engine/layout.ts";
+import * as MX from "../src/engine/mix.ts";
 import * as SP from "../src/engine/sprig.ts";
 import { SIZES } from "../src/engine/tune.ts";
 import * as G from "../src/engine/geom.ts";
@@ -254,4 +256,59 @@ for (const seed of ["spray 1", "spray 2"]) {
       `(function() local e = LA.excursion(R.new(${lit(name)}), ${lit(spec)}, ${lit(root)}); if not e then return NULL end; return {e.pts, e.width(0.25)} end)()`);
   }
   add("layout cartouche", () => [LA.cartoucheSize(148), LA.cartoucheSize(40, 2), LA.cartoucheSize(300)], "{{LA.cartouche_size(148)}, {LA.cartouche_size(40, 2)}, {LA.cartouche_size(300)}}");
+}
+
+// Growth on a page's stems: leaves at the nodes, tips, holes and details,
+// as compose runs them (without the ornaments' reservations).
+{
+  const lines = Array.from({ length: 48 }, (_, i) => ({ x0: 162, x1: i === 47 ? 300 : 436, y0: 712 - 12 * i, y1: 720 - 12 * i }));
+  const spec = { width: 595, height: 842, text: { x0: 162, y0: 120, x1: 436, y1: 720 }, header_y: 760, lines };
+  const hero = [84.5, 606, 68.5] as const;
+  for (const [seed, mix] of [["grow 1", undefined], ["grow 2", { lily: 3, density: 0.7, leaves: 1.5, curls: 2 }]] as const) {
+    add(`grow page ${seed}`, () => {
+      const [g, m] = LA.region(spec);
+      g.field();
+      const gest = LA.gesture(new Rng(seed).fork("gesture"), m, hero);
+      const [strands] = LA.strands(new Rng(seed).fork("strands"), m, hero, 595, gest, [16, 300, 66, 370]);
+      for (const st of strands) g.reserveLine(st.pts, 2, 4);
+      const ctx: GR.GrowContext = {
+        cfg: MX.cfg(undefined, mix), mix, mw: m.x1 - m.x0, dens: MX.density(gest.density, mix), ylo: m.y0, span: hero[1] - m.y0,
+        strands, stems: strands, stemBatch: new SP.Batch(), sprays: new SP.Batch(), blooms: [], back: [], leaves: [], leaflets: [], counts: {},
+      };
+      const r = new Rng(seed).fork("grow");
+      GR.nodeLeaves(g, r.fork("nodes"), strands, ctx);
+      GR.tips(g, r.fork("tips"), strands, ctx);
+      GR.holes(g, r.fork("holes"), ctx);
+      GR.details(g, r.fork("details"), ctx);
+      const counts = ["bloom", "soft", "lily", "ghost", "umbel", "cyme", "gyps"].map((k) => ctx.counts[k] ?? 0);
+      return [counts, ctx.leaves.map((l) => l.at), ctx.blooms.map((b) => b.at), ctx.back.map((b) => b.at), ctx.leaflets, batchOf(ctx.sprays), batchOf(ctx.stemBatch), strands.map((st) => Array.from({ length: 11 }, (_, k) => st.width(k / 10))), g.coverage()];
+    }, `(function()
+      ${BATCH_LUA}
+      local spec = ${lit(spec)}
+      local mix = ${mix ? lit(mix) : "nil"}
+      local hero = ${lit(hero)}
+      local g, m = LA.region(spec)
+      g:field()
+      local gest = LA.gesture(R.new(${lit(seed)}):fork("gesture"), m, hero)
+      local strands = LA.strands(R.new(${lit(seed)}):fork("strands"), m, hero, 595, gest, {16, 300, 66, 370})
+      for _, st in ipairs(strands) do g:reserve_line(st.pts, 2, 4) end
+      local pos = {}
+      local ctx = { cfg = MX.cfg(TU.compose, mix), mix = mix, pos = pos, mw = m.x1 - m.x0, dens = MX.density(gest.density, mix), ylo = m.y0, span = hero[2] - m.y0,
+        strands = strands, stems = strands, stem_batch = SP.batch(), sprays = SP.batch(), blooms = {}, back = {}, leaves = {}, leaflets = {}, counts = {} }
+      local r = R.new(${lit(seed)}):fork("grow")
+      local res
+      MX.with_mix(mix, function()
+        GR.node_leaves(g, r:fork("nodes"), strands, ctx)
+        GR.tips(g, r:fork("tips"), strands, ctx)
+        GR.holes(g, r:fork("holes"), ctx)
+        GR.details(g, r:fork("details"), ctx)
+      end)
+      local function at(list) local t = {}; for i, f in ipairs(list) do t[i] = pos[f] end; return t end
+      local counts = {}
+      for i, k in ipairs({"bloom", "soft", "lily", "ghost", "umbel", "cyme", "gyps"}) do counts[i] = ctx.counts[k] or 0 end
+      local widths = {}
+      for i, st in ipairs(strands) do local ws = {}; for k = 0, 10 do ws[#ws + 1] = st.width(k / 10) end; widths[i] = ws end
+      return {counts, at(ctx.leaves), at(ctx.blooms), at(ctx.back), ctx.leaflets, plain(ctx.sprays), plain(ctx.stem_batch), widths, g:coverage()}
+    end)()`);
+  }
 }

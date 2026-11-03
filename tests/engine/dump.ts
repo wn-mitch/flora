@@ -8,7 +8,7 @@ import { hash, Rng } from "../../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../../src/engine/space.ts";
 import * as LA from "../../src/engine/layout.ts";
 import type { Cmd, Pt } from "../../src/engine/geom.ts";
-import { blooms, grow, numbers, sprays } from "./scenes.ts";
+import { blooms, grow, growPage, numbers, sprays } from "./scenes.ts";
 
 type Flat = number | boolean | string | readonly Flat[];
 
@@ -162,4 +162,15 @@ for (const seed of ["agree 1", "agree 2"]) {
     for (let k = 0; k <= 10; k++) ws.push(st.width(k / 10));
     line(`layout stem ${fmt(i, 0)}`, [st.kind ?? "main", st.pts, ws]);
   }
+}
+
+// A page's growth: what was placed where.
+for (const { seed, mix } of [{ seed: "agree 1" }, { seed: "agree 2", mix: { lily: 3, density: 0.7 } }]) {
+  const [g, ctx] = growPage(seed, mix);
+  line(`grow ${seed} counts`, ["bloom", "soft", "lily", "ghost", "umbel", "cyme", "gyps"].map((k) => ctx.counts[k] ?? 0));
+  line(`grow ${seed} leaves`, ctx.leaves.map((l) => l.at));
+  line(`grow ${seed} blooms`, [ctx.blooms.map((b) => b.at), ctx.back.map((b) => b.at)]);
+  line(`grow ${seed} leaflets`, ctx.leaflets);
+  line(`grow ${seed} florets`, ctx.sprays.florets.map((f) => [f.x, f.y, f.r]));
+  line(`grow ${seed} coverage`, [g.coverage()]);
 }
