@@ -123,7 +123,10 @@ export function stem(pt: Painter, rng: Rng, pts: readonly Pt[], wfn: (t: number)
   const outline = G.smooth(G.ribbon(pts, (t) => wfn(t) / 2), true);
   pt.fill(outline, tone(L, 0.85), 0.55 + 0.35 * (1 - cfg.stem_brush), { blend: "multiply" });
   if (cfg.stem_brush <= 0) return;
-  const line = G.resample(pts, Math.max(8, Math.floor(G.length(pts) / 3)));
+  // A point every 3 pt. Stems are often a whole number of steps long, and
+  // runtimes sum that length an ulp apart, so the count is taken a hair
+  // above the boundary to come out the same everywhere.
+  const line = G.resample(pts, Math.max(8, Math.floor(G.length(pts) / 3 + 1e-6)));
   let wmax = 0;
   for (let i = 0; i <= 10; i++) wmax = Math.max(wmax, wfn(i / 10));
   pt.clipBegin(outline);

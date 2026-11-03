@@ -149,23 +149,13 @@ const clockTs = (T: number, fn: (pt: Painter, k: GrowthClock, p: Page) => void) 
   const p = page("clock", ALL);
   fn(pt, new GrowthClock(p.g, p.strands, T), p);
 };
-// Brush.stem resamples a stem at floor(length / 3) points. Many strands
-// are exactly a whole number of 3 pt steps long, where Node and Lua sum
-// the length an ulp apart and so resample at different counts; the stem
-// scenes paint only the strands away from that boundary (the clock is
-// still built over every strand).
-const offBoundary = (pts: readonly Pt[]) => {
-  const q = G.length(pts) / 3;
-  return Math.abs(q - Math.floor(q + 0.5)) >= 1e-9;
-};
 for (const T of [0.3, 0.7]) {
   scene(`paint clock stems ${T}`, clockTs(T, (pt, k, p) => {
     const sr = new Rng("stem paint");
-    for (const s of p.strands) if (offBoundary(s.pts)) k.stem(pt, s, PLANT.root_width, (q) => BR.stem(q, sr, s.pts, s.width ?? (() => 1), PLANT));
+    for (const s of p.strands) k.stem(pt, s, PLANT.root_width, (q) => BR.stem(q, sr, s.pts, s.width ?? (() => 1), PLANT));
   }), clockLua(T, `local sr = R.new("stem paint")
     for _, s in ipairs(strands) do
-      local q = G.length(s.pts) / 3
-      if math.abs(q - math.floor(q + 0.5)) >= 1e-9 then k:stem(pt, s, TU.plant.root_width, function(p) BR.stem(p, sr, s.pts, s.width, TU.plant) end) end
+      k:stem(pt, s, TU.plant.root_width, function(p) BR.stem(p, sr, s.pts, s.width, TU.plant) end)
     end`));
   scene(`paint clock leaflets ${T}`, clockTs(T, (pt, k, p) => {
     k.leaflets(pt, new Rng("leaflets"), p.ctx.leaflets.slice(0, 40), (q, r, items) => LF.leaflets(q, r, items, PAL.deep, 0.9));

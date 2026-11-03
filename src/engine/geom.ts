@@ -276,12 +276,18 @@ export function resample(pts: readonly Pt[], n: number): Pt[] {
 
 // A closed outline round a centreline whose half-width at fraction t is
 // w(t): the left side out, the right side back.
+// Where a point's neighbours coincide (closer than 1e-9 pt) the heading
+// carries over from the point before (0 at the start), so a line of one
+// repeated point still gets a fixed normal rather than one rounding noise
+// picks.
 export function ribbon(pts: readonly Pt[], w: (t: number) => number): Pt[] {
   const n = pts.length;
   const left: Pt[] = [], right: Pt[] = [];
+  let heading = 0;
   for (let i = 0; i < n; i++) {
     const a = pts[Math.max(i - 1, 0)], b = pts[Math.min(i + 1, n - 1)];
-    const ang = angle(a, b) + PI / 2;
+    if (Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]) > 1e-9) heading = angle(a, b);
+    const ang = heading + PI / 2;
     const hw = w(i / (n - 1));
     left.push(polar(pts[i], ang, hw));
     right.push(polar(pts[i], ang, -hw));
