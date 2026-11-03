@@ -15,6 +15,7 @@ import * as RL from "../src/engine/orn_relief.ts";
 import * as RN from "../src/engine/orn_roundel.ts";
 import * as SC from "../src/engine/orn_scroll.ts";
 import * as ORN from "../src/engine/ornaments.ts";
+import * as PEN from "../src/engine/orn_pen.ts";
 import { PAL, Painter } from "../src/engine/paint.ts";
 import { PLANT } from "../src/engine/tune.ts";
 import { numbers } from "./engine/scenes.ts";
@@ -380,6 +381,41 @@ for (const seed of ["v1", "v3", "v15", "v18"]) {
 }
 scene("paint scroll", (pt) => { SC.scroll(pt, [50, 50], 0.3, 40, 1, 3); SC.scroll(pt, [200, 100], 2, 30, -1, 2); },
   "local SC = require(\"flora.orn_scroll\"); SC.scroll(pt, {50, 50}, 0.3, 40, 1, 3); SC.scroll(pt, {200, 100}, 2, 30, -1, 2)");
+// The pen's strokes off the paths the kinds take: a broad nib, and a
+// pointed pen with one taper for both ends and a slanted pull.
+{
+  const pts = PEN.path([10, 20], 0.3, [[40, 0.2, "out"], [30, -0.4, "bell"], [20, 0.9, "in"]])[0];
+  const lp = `local P = require("flora.orn_pen"); local pts = P.path({10, 20}, 0.3, {{40, 0.2, "out"}, {30, -0.4, "bell"}, {20, 0.9, "in"}})`;
+  add("geom pen broad", () => [PEN.broad(pts), PEN.broad(pts, { hair: 0.2, nib: 1.4, angle: 0.7, step: 0.8 })],
+    `(function() ${lp}; return {P.broad(pts), P.broad(pts, { hair = 0.2, nib = 1.4, angle = 0.7, step = 0.8 })} end)()`);
+  add("geom pen pointed", () => PEN.pointed(pts, { taper: 0.1, down: -2 }),
+    `(function() ${lp}; return P.pointed(pts, { taper = 0.1, down = -2 }) end)()`);
+}
+// Flourishes and corners in boxes of their slots' shape, under several
+// seeds so each kind's forms (ink or gilt, mirrored or turned, the
+// swelled rule's four) all come up; corners also mirrored into other
+// corners. Then the same with the gilt in relief: the kind's own draw,
+// without the registry's gilder, so only its direct orn_gild calls (which
+// both sides make) are gilt, and the Lua takes the vector path since the
+// recording painter has no pdf backend.
+{
+  const BOXES: Record<string, readonly [number, number, number, number]> = { flourish: [20, 120, 280, 166], corner: [100, 100, 172, 172] };
+  const FLIPS: (readonly [number, number] | undefined)[] = [undefined, [-1, 1], [1, -1]];
+  for (const k of ["flourish", "corner"].flatMap((slot) => ORN.of(slot))) {
+    const box = BOXES[k.slot];
+    const flips = k.slot === "corner" ? FLIPS : [undefined];
+    for (const seed of [1, 2, 3, 4, 5, 6]) {
+      const flip = flips[seed % flips.length];
+      const o: ORN.SlotOptions = flip === undefined ? {} : { flip };
+      const lo = flip === undefined ? "{}" : `{ flip = ${lit(flip)} }`;
+      const name = `${k.name} ${seed}${flip === undefined ? "" : ` flip ${flip.join(",")}`}`;
+      scene(`paint ornament ${name}`, (pt) => ORN.draw(k, pt, new Rng(`${k.name} ${seed}`), box, o),
+        `ORN.draw(${lit(k.name)}, pt, R.new(${lit(`${k.name} ${seed}`)}), ${lit(box)}, ${lo})`);
+      scene(`paint ornament ${name} relief`, (pt) => { pt.flatGilt = false; k.draw(pt, new Rng(`${k.name} ${seed}`), box, o); },
+        `pt.flat_gilt = false; ORN.kinds[${lit(k.name)}].draw(pt, R.new(${lit(`${k.name} ${seed}`)}), ${lit(box)}, ${lo})`);
+    }
+  }
+}
 // The flora, painted.
 scene("paint leaf", (pt) => { const r = new Rng("leaf"); LF.leaf(pt, r, 120, 40, 1.3, LF.options(r, 110, 1.3)); },
   "local r = R.new(\"leaf\"); LF.leaf(pt, r, 120, 40, 1.3, LF.options(r, 110, 1.3))");

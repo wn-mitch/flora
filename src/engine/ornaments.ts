@@ -4,6 +4,8 @@
 import { GILDER } from "./orn_gild.ts";
 import { registerCelestial } from "./orn_celestial.ts";
 import { registerClassic } from "./orn_classic.ts";
+import { registerCorner } from "./orn_corner.ts";
+import { registerFlourish } from "./orn_flourish.ts";
 import { registerGilt } from "./orn_gilt.ts";
 import { registerPieces } from "./orn_pieces.ts";
 import { registerRoundel } from "./orn_roundel.ts";
@@ -25,6 +27,8 @@ export function registerAll(): void {
   registerScroll();
   registerRoundel();
   registerPieces();
+  registerFlourish();
+  registerCorner();
   registerGilt();
 }
 

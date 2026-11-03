@@ -7,6 +7,8 @@ import * as G from "../../src/engine/geom.ts";
 import { hash, Rng } from "../../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../../src/engine/space.ts";
 import * as LA from "../../src/engine/layout.ts";
+import * as ORN from "../../src/engine/ornaments.ts";
+import { Painter } from "../../src/engine/paint.ts";
 import type { Cmd, Pt } from "../../src/engine/geom.ts";
 import { blooms, grow, growPage, numbers, sprays } from "./scenes.ts";
 
@@ -173,4 +175,13 @@ for (const { seed, mix } of [{ seed: "agree 1" }, { seed: "agree 2", mix: { lily
   line(`grow ${seed} leaflets`, ctx.leaflets);
   line(`grow ${seed} florets`, ctx.sprays.florets.map((f) => [f.x, f.y, f.r]));
   line(`grow ${seed} coverage`, [g.coverage()]);
+}
+
+// Flourishes and corners, gilt in relief, a corner mirrored: every number
+// painted.
+for (const k of [...ORN.of("flourish"), ...ORN.of("corner")]) {
+  const pt = new Painter({ width: 300, height: 300 });
+  const box: ORN.Box = k.slot === "corner" ? [100, 100, 172, 172] : [20, 120, 280, 166];
+  ORN.draw(k, pt, new Rng(k.name), box, k.slot === "corner" ? { flip: [-1, 1] } : {});
+  line(`ornament ${k.name}`, numbers(pt.scene().items));
 }
