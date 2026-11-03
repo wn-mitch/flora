@@ -1,5 +1,6 @@
 // Scenes the engine's tests and tests/agreement.ts grow, and every number
 // one holds, for comparing scenes number by number.
+import * as F from "../../src/engine/flower.ts";
 import { leaf, options } from "../../src/engine/leaf.ts";
 import { Painter, type Scene, type SceneItem } from "../../src/engine/paint.ts";
 import { Rng } from "../../src/engine/rng.ts";
@@ -8,6 +9,19 @@ export function grow(seed: string, len = 110, ang = 1.3): Scene {
   const pt = new Painter({ width: 240, height: 320 });
   const r = new Rng(seed);
   leaf(pt, r, 120, 40, ang, options(r, len, ang));
+  return pt.scene();
+}
+
+// A bloom of each kind on one page: a styled bloom, the tilted hero, a
+// lily seen at an angle, a bud and a few florets.
+export function blooms(seed: string, style: string): Scene {
+  const pt = new Painter({ width: 300, height: 300 });
+  const r = new Rng(seed);
+  F.bloom(pt, r.fork("bloom"), 80, 80, 36, { style });
+  F.hero(pt, r.fork("hero"), 200, 200, 50);
+  F.tilted(pt, r.fork("lily"), 80, 220, 30, 2.1, 1.0, { kind: "lance", petals: 6, width: 0.36 });
+  F.bud(pt, 220, 60, 0.7, 14);
+  F.florets(pt, [{ x: 150, y: 40, r: 2, rot: 0.3, tint: 1 }, { x: 160, y: 44, r: 0.8, tint: 3 }, { x: 170, y: 40, r: 1.6, soft: true }]);
   return pt.scene();
 }
 

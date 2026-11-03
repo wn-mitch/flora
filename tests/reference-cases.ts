@@ -3,6 +3,7 @@
 // tikz-flora's modules R (rng), G (geom), C (color) and S (space). Inputs
 // come from a fixed stream, so every run checks the same cases.
 import * as C from "../src/engine/color.ts";
+import * as F from "../src/engine/flower.ts";
 import * as G from "../src/engine/geom.ts";
 import { hash, Rng } from "../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../src/engine/space.ts";
@@ -166,4 +167,22 @@ for (const v of ["light", "dark", "#102030", "#A0B0C0", "#zz0000", "#10203", "re
     for i, p in ipairs(probes) do c[i] = {s:room(p[1], p[2]), s:clearance(p[1], p[2], 30, true)} end
     return {a, s.maxf, b, c, s:free_cells(5), s:coverage()}
   end)()`);
+}
+
+// Petals of every kind, free and slotted, and the hero's tilt.
+for (const kind of ["obovate", "lance", "round", "ghost", "fan", "wedge"]) {
+  for (const [k, slotted] of [[0, false], [1, true]] as const) {
+    const L = num(10, 60), Wd = L * num(0.3, 0.6), bend = num(-0.1, 0.1), wave = num(0.05, 0.2), seed = `petal ${kind} ${k}`;
+    const sl = slotted ? F.slot(5, 0.08, 0.09) : undefined;
+    add(`flower petal ${kind}${slotted ? " slotted" : ""}`, () => F.petal(new Rng(seed), kind, L, Wd, bend, slotted ? wave : undefined, sl),
+      `F.petal(R.new(${lit(seed)}), ${lit(kind)}, ${lit(L)}, ${lit(Wd)}, ${lit(bend)}, ${slotted ? lit(wave) : "nil"}, ${slotted ? "F.slot(5, 0.08, 0.09)" : "nil"})`);
+  }
+}
+add("flower slot", () => [F.slot(5, 0.08, 0.09), F.slot(6, 0, 0.1), F.slot(3, 0.2, 2)], "{F.slot(5, 0.08, 0.09), F.slot(6, 0, 0.1), F.slot(3, 0.2, 2)}");
+{
+  const probes = points(12, 80);
+  for (const deg of [0, 35, 60]) {
+    add(`flower tilt ${deg}`, () => { const [fn, rh] = F.tilt(10, -20, 45, deg); return [probes.map(([x, y]) => fn(x, y)), rh]; },
+      `(function() local fn, rh = F.tilt(10, -20, 45, ${deg}); local out = {}; for i, p in ipairs(${lit(probes)}) do out[i] = {fn(p[1], p[2])} end; return {out, rh} end)()`);
+  }
 }

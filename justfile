@@ -45,3 +45,8 @@ test: typecheck
 # washes, converts the scene and draws it with WebGL2 (build/leaf-bench.png).
 leaf-bench LEAVES="50" RUNS="5" SCALE="2":
     node tests/leaf-bench.mjs {{LEAVES}} {{RUNS}} {{SCALE}}
+
+# The same for BLOOMS blooms of every style, the tilted hero and lilies
+# (build/bloom-bench.png).
+bloom-bench BLOOMS="12" RUNS="5" SCALE="2":
+    node tests/leaf-bench.mjs {{BLOOMS}} {{RUNS}} {{SCALE}} blooms

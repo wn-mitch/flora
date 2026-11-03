@@ -79,6 +79,9 @@ export const PAL = {
 // lightest thing on the page either way.
 const KEEP = [PAL.gold, PAL.copper, PAL.white];
 
+// A map from the generator's coordinates to the page's (Painter.project).
+export type Projection = (this: void, x: number, y: number) => Pt;
+
 export interface PaintOptions {
   // `blend` multiply or screen; `evenodd` fills under the even-odd rule.
   readonly blend?: Blend;
@@ -128,6 +131,7 @@ export class Painter {
   private root: SceneItem[] = [];
   private open: SceneClip[] = [];
   private inked: Record<string, RGB> = {};
+  private projection: Projection | undefined;
 
   constructor(o: PainterOptions) {
     this.width = o.width;
@@ -163,6 +167,12 @@ export class Painter {
     return this.backdrop === undefined ? mode : SWAP[mode] ?? mode;
   }
 
+  // Set (or with undefined, clear) a projection every path and shading
+  // passes through until it is cleared: a tilted bloom (flower.ts tilt).
+  project(fn: Projection | undefined): void {
+    this.projection = fn;
+  }
+
   // Fill one path.
   fill(cmds: readonly Cmd[], rgb: RGB, opacity = 1, o: PaintOptions = {}): void {
     this.fillMany([cmds], rgb, opacity, o);
@@ -190,6 +200,11 @@ export class Painter {
   // and its end at p1, covering `half` pt to either side of that axis and
   // half the axis' length beyond either end. Use inside a clip.
   shade(stops: readonly (readonly [number, RGB])[], p0: Pt, p1: Pt, half: number): void {
+    const pj = this.projection;
+    if (pj !== undefined) {
+      p0 = pj(p0[0], p0[1]);
+      p1 = pj(p1[0], p1[1]);
+    }
     const dx = p1[0] - p0[0], dy = p1[1] - p0[1];
     const len = Math.sqrt(dx * dx + dy * dy);
     if (len < 0.01) return;
@@ -199,8 +214,9 @@ export class Painter {
     const a: Pt = [p0[0] - ux * ext, p0[1] - uy * ext];
     const b: Pt = [p1[0] + ux * ext, p1[1] + uy * ext];
     const band: Cmd[] = [["m", a[0] + nx, a[1] + ny], ["l", b[0] + nx, b[1] + ny], ["l", b[0] - nx, b[1] - ny], ["l", a[0] - nx, a[1] - ny], ["z"]];
+    // The axis and band are already projected.
     this.add({
-      kind: "fill", path: this.path([band]),
+      kind: "fill", path: this.path([band], false),
       paint: { kind: "linear", from: this.pt(p0), to: this.pt(p1), stops: stops.map((s): [number, RGB] => [s[0], this.ink(s[1])]) },
       rule: "nonzero", alpha: 1, blend: "normal",
     });
@@ -234,30 +250,45 @@ export class Painter {
     return [p[0], this.height - p[1]];
   }
 
-  // The scene path for `paths`, y turned over; circles become Bezier arcs.
-  private path(paths: readonly (readonly Cmd[])[]): ScenePath {
+  // The scene path for `paths`, through the projection (unless `project`
+  // is false) and with y turned over; circles become Bezier arcs, whose
+  // control points are projected.
+  private path(paths: readonly (readonly Cmd[])[], project = true): ScenePath {
     const verbs: number[] = [], coords: number[] = [];
     const H = this.height;
+    const pj = project ? this.projection : undefined;
+    const put = (x: number, y: number): void => {
+      if (pj === undefined) {
+        coords.push(x, H - y);
+      } else {
+        const q = pj(x, y);
+        coords.push(q[0], H - q[1]);
+      }
+    };
     for (const cmds of paths) {
       for (const c of cmds) {
         if (c[0] === "m") {
           verbs.push(MOVE);
-          coords.push(c[1], H - c[2]);
+          put(c[1], c[2]);
         } else if (c[0] === "l") {
           verbs.push(LINE);
-          coords.push(c[1], H - c[2]);
+          put(c[1], c[2]);
         } else if (c[0] === "c") {
           verbs.push(CUBIC);
-          coords.push(c[1], H - c[2], c[3], H - c[4], c[5], H - c[6]);
+          put(c[1], c[2]);
+          put(c[3], c[4]);
+          put(c[5], c[6]);
         } else if (c[0] === "z") {
           verbs.push(CLOSE);
         } else {
           const x = c[1], y = c[2], r = c[3];
           verbs.push(MOVE);
-          coords.push(x + r, H - y);
+          put(x + r, y);
           for (const a of circleArcs(x, y, r)) {
             verbs.push(CUBIC);
-            coords.push(a[0], H - a[1], a[2], H - a[3], a[4], H - a[5]);
+            put(a[0], a[1]);
+            put(a[2], a[3]);
+            put(a[4], a[5]);
           }
           verbs.push(CLOSE);
         }

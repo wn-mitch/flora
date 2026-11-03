@@ -97,3 +97,29 @@ test("shading lays a linear gradient along its axis, turned over", () => {
   // The band runs half the axis beyond each end: y 0 to 40, turned over.
   eqList(it.path.coords, [-5, 100, -5, 60, 5, 60, 5, 100], "band");
 });
+
+test("a projection moves every path and shading once, and clears", () => {
+  const pt = new Painter({ width: 100, height: 100 });
+  pt.project((x, y) => [2 * x, y + 10]);
+  pt.fill([["m", 1, 2], ["c", 1, 1, 2, 2, 3, 3]], PAL.blue);
+  pt.fill([["o", 5, 5, 3]], PAL.blue);
+  pt.shade([[0, PAL.white], [1, PAL.deep]], [0, 10], [0, 30], 5);
+  pt.project(undefined);
+  pt.fill([["m", 1, 2]], PAL.blue);
+  const [path, circle, shade, plain] = pt.scene().items;
+  if (path.kind !== "fill" || circle.kind !== "fill" || shade.kind !== "fill" || plain.kind !== "fill") throw new Error("four fills");
+  eqList(path.path.coords, [2, 88, 2, 89, 4, 88, 6, 87], "every control point projected");
+  // A circle's arcs start at (x + r, y) and every control point is mapped.
+  eqList(circle.path.coords.slice(0, 2), [16, 85], "circle start projected");
+  for (let k = 0; k < circle.path.coords.length; k += 2) {
+    const x = circle.path.coords[k] / 2, y = 100 - circle.path.coords[k + 1] - 10;
+    check(Math.abs(Math.sqrt((x - 5) ** 2 + (y - 5) ** 2) - 3) < 1.2, "circle points near the circle before projecting");
+  }
+  if (shade.paint.kind !== "linear") throw new Error("a gradient");
+  // The axis is projected once: (0, 20) to (0, 40), turned over; the band
+  // around it is laid in page coordinates, not projected again.
+  eqList(shade.paint.from, [0, 80], "axis start");
+  eqList(shade.paint.to, [0, 60], "axis end");
+  eqList(shade.path.coords, [-5, 90, -5, 50, 5, 50, 5, 90], "band");
+  eqList(plain.path.coords, [1, 98], "a cleared projection leaves paths alone");
+});

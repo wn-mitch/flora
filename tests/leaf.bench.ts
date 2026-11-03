@@ -1,12 +1,14 @@
-// Runs in Chrome (tests/leaf-bench.mjs): grows a sheet of leaves with the
-// engine, converts it to a display list and draws it with WebGL2, timing
+// Runs in Chrome (tests/leaf-bench.mjs): grows a sheet of leaves (or with
+// ?what=blooms, of blooms of every style, the tilted hero and lilies) with
+// the engine, converts it to a display list and draws it with WebGL2, timing
 // each step. The median of several runs is reported.
-import { leaf, Painter, Rng } from "../src/engine/index.ts";
+import { flower, leaf, Painter, Rng } from "../src/engine/index.ts";
 import { toDisplayList } from "../src/scene.ts";
 import { stats } from "../src/display.ts";
 import { WebGLRenderer } from "../src/webgl.ts";
 
 const q = new URLSearchParams(location.search);
+const WHAT = q.get("what") ?? "leaves";
 const N = Number(q.get("leaves") ?? 50), RUNS = Number(q.get("runs") ?? 5), SCALE = Number(q.get("scale") ?? 2);
 const W = 720, H = 720;
 
@@ -17,7 +19,14 @@ function grow(run: number) {
     const r = new Rng(`bench ${i}`);
     const x = ((i % cols) + 0.5) * (W / cols), y = (Math.floor(i / cols) + 0.15) * (H / cols);
     const len = 40 + ((i * 37) % 110), ang = 1.2 + ((i * 0.41) % 0.8);
-    leaf.leaf(pt, r, x, y, ang, leaf.options(r, len, ang));
+    if (WHAT === "blooms") {
+      const R = 0.38 * (W / cols), k = i % 6;
+      if (k === 4) flower.hero(pt, r, x, y + R, R);
+      else if (k === 5) flower.tilted(pt, r, x, y + R, R * 0.8, 1.2 + ang * 0.3, 1.0, { kind: "lance", petals: 6, width: 0.36 });
+      else flower.bloom(pt, r, x, y + R, R * 0.8, { style: ["fan", "round", "soft", "wedge"][k] });
+    } else {
+      leaf.leaf(pt, r, x, y, ang, leaf.options(r, len, ang));
+    }
   }
   return pt;
 }

@@ -1,7 +1,8 @@
 // Times the engine in headless Chrome on a sheet of leaves with their
 // washes: growing them, converting the scene to a display list and drawing
-// it with WebGL2. `node tests/leaf-bench.mjs [leaves] [runs] [scale]`;
-// writes the drawing to build/leaf-bench.png.
+// it with WebGL2. `node tests/leaf-bench.mjs [count] [runs] [scale] [what]`,
+// `what` leaves (the default) or blooms; writes the drawing to
+// build/leaf-bench.png (build/bloom-bench.png for blooms).
 import { build } from "esbuild";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -9,7 +10,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
-const [leaves = "50", runs = "5", scale = "2"] = process.argv.slice(2);
+const [leaves = "50", runs = "5", scale = "2", what = "leaves"] = process.argv.slice(2);
+if (what !== "leaves" && what !== "blooms") throw new Error(`leaf-bench: what is leaves or blooms, not ${what}`);
+const png = join("build", what === "blooms" ? "bloom-bench.png" : "leaf-bench.png");
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const out = join(root, "build", "leaf-bench.js");
 await build({ entryPoints: [join(root, "tests", "leaf.bench.ts")], bundle: true, format: "esm", outfile: out, logLevel: "warning" });
@@ -25,17 +28,17 @@ try {
   const p = await browser.newPage({ viewport: { width: 1440, height: 1440 } });
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e)));
-  await p.goto(`http://127.0.0.1:${server.address().port}/?leaves=${leaves}&runs=${runs}&scale=${scale}`, { waitUntil: "commit" });
+  await p.goto(`http://127.0.0.1:${server.address().port}/?leaves=${leaves}&runs=${runs}&scale=${scale}&what=${what}`, { waitUntil: "commit" });
   await p.waitForFunction(() => window.done || null, null, { timeout: 300000 }).catch(() => {});
   const done = await p.evaluate(() => window.done);
   if (!done) throw new Error("the bench never finished: " + errors.join("; "));
-  await p.locator("canvas").screenshot({ path: join(root, "build", "leaf-bench.png") });
+  await p.locator("canvas").screenshot({ path: join(root, png) });
   const ms = (x) => `${x.toFixed(1)} ms`;
-  console.log(`${done.leaves} leaves on ${done.size} at ${done.scale}x, median of ${done.runs} runs (first run in brackets):`);
+  console.log(`${done.leaves} ${what} on ${done.size} at ${done.scale}x, median of ${done.runs} runs (first run in brackets):`);
   for (const k of ["engine", "convert", "prepare", "draw"]) console.log(`  ${k.padEnd(8)} ${ms(done[k]).padStart(10)}  (${ms(done.first[k])})`);
   console.log(`  total    ${ms(done.engine + done.convert + done.prepare + done.draw).padStart(10)}`);
   console.log(`  ${JSON.stringify(done.info)}`);
-  console.log("  drawing: build/leaf-bench.png");
+  console.log(`  drawing: ${png}`);
 } finally {
   await browser.close();
   server.close();

@@ -38,6 +38,7 @@ R = require("flora.rng")
 G = require("flora.geom")
 C = require("flora.color")
 S = require("flora.space")
+F = require("flora.flower")
 NULL = setmetatable({}, { __tostring = function() return "null" end })
 -- n draws of method m (with args) from stream r.
 function draws(r, n, m, ...)
