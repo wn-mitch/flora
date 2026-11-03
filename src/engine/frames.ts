@@ -125,6 +125,17 @@ interface FrameOptions {
   readonly label?: string;
 }
 
+// A page spec being built for a frame.
+type Spec = { -readonly [K in keyof FloraSpec]: FloraSpec[K] };
+
+// Set field k of s to v, or remove it when v is undefined. A spread with
+// `k: undefined` cannot remove a field in the Lua build: a nil in a table
+// constructor leaves the spread's value in place.
+function set<K extends keyof FloraSpec>(s: Spec, k: K, v: FloraSpec[K]): void {
+  if (v === undefined) delete s[k];
+  else s[k] = v;
+}
+
 // A frame of size w x h whose map to the page is `m`. The page's text block
 // (or `block`) and its measured lines are carried into the frame; lines
 // outside the frame are dropped.
@@ -140,14 +151,14 @@ function frame(spec: FloraSpec, m: Affine, w: number, h: number, o: FrameOptions
       if (c !== undefined) lines.push(c);
     }
   }
-  const s: FloraSpec = {
-    ...spec, width: w, height: h, text, lines,
-    header_y: o.header === true ? spec.header_y : undefined,
-    closed: o.closed,
-    // A wreath or a crown frames the text; it does not grow into it.
-    frame_only: o.frame_only, layout: undefined,
-    seed: o.seed ?? spec.seed,
-  };
+  const s: Spec = { ...spec, width: w, height: h, text };
+  set(s, "lines", lines);
+  set(s, "header_y", o.header === true ? spec.header_y : undefined);
+  set(s, "closed", o.closed);
+  // A wreath or a crown frames the text; it does not grow into it.
+  set(s, "frame_only", o.frame_only);
+  set(s, "layout", undefined);
+  set(s, "seed", o.seed ?? spec.seed);
   return { spec: s, map: m, fn: (x, y) => apply(m, x, y), label: o.label };
 }
 
@@ -193,11 +204,12 @@ function curved(spec: FloraSpec, fn: Projection, inv: Projection, w: number, h: 
   }
   let mix = spec.mix;
   if (o.density !== undefined) mix = { ...(spec.mix ?? {}), density: weight(spec.mix, "density") * o.density };
-  const s: FloraSpec = {
-    ...spec, width: w, height: h, text, lines,
-    header_y: undefined, layout: undefined, frame_only: true, bare: true,
-    seed: o.seed ?? spec.seed, mix,
-  };
+  const s: Spec = { ...spec, width: w, height: h, text, frame_only: true, bare: true };
+  set(s, "lines", lines);
+  set(s, "header_y", undefined);
+  set(s, "layout", undefined);
+  set(s, "seed", o.seed ?? spec.seed);
+  set(s, "mix", mix);
   return { spec: s, fn, inv, label: o.label };
 }
 

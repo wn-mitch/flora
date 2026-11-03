@@ -102,7 +102,8 @@ export function motif(m: Motif, mix?: Mix): Motif | undefined {
   const w = weight(mix, m.kind);
   if (w === 1) return m;
   if (w <= 0) return undefined;
-  return { ...m, w: m.w * w, cap: m.cap === undefined ? undefined : Math.max(1, Math.floor(m.cap * w + 0.5)) };
+  if (m.cap === undefined) return { ...m, w: m.w * w };
+  return { ...m, w: m.w * w, cap: Math.max(1, Math.floor(m.cap * w + 0.5)) };
 }
 
 // A seed as a number, as Lua's tonumber reads it; undefined when it is not

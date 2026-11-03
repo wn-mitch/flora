@@ -35,3 +35,9 @@ export const cases = [
 for (const k in o) cases.push(o[k]); // order
 holes.push(maybe()); // hole
 export const gap = [1, maybe()]; // hole
+const base = { a: 1, b: 2 as number | undefined };
+export const cleared = { ...base, b: undefined }; // spread-nil
+export const maybeCleared = { ...base, b: maybe() }; // spread-nil
+const b = maybe();
+export const shorthand = { ...base, b }; // spread-nil
+export const before = { c: maybe(), ...base };

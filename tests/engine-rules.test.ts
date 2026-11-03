@@ -24,7 +24,7 @@ if (!config) throw new Error("tsconfig.json did not parse");
 const program = ts.createProgram([...ENGINE, FIXTURE, PLATFORM, join(ROOT, "lua/platform.d.ts")], config.options);
 const checker = program.getTypeChecker();
 
-type Rule = "bitwise" | "mod" | "regex" | "number-to-string" | "order" | "typed-array" | "host" | "hole";
+type Rule = "bitwise" | "mod" | "regex" | "number-to-string" | "order" | "typed-array" | "host" | "hole" | "spread-nil";
 interface Violation { rule: Rule; line: number; text: string }
 
 const BITWISE = new Set([
@@ -65,6 +65,15 @@ function violations(file: string): Violation[] {
       if (op === ts.SyntaxKind.PlusToken && ((isString(node.left) && isNumber(node.right)) || (isNumber(node.left) && isString(node.right)))) add("number-to-string", node);
     } else if (ts.isArrayLiteralExpression(node)) {
       for (const el of node.elements) if (!ts.isSpreadElement(el) && !ts.isOmittedExpression(el) && mayBeNil(el)) add("hole", el);
+    } else if (ts.isObjectLiteralExpression(node)) {
+      // After a spread, a field that may be undefined cannot clear the
+      // spread's value in Lua: a nil in a table constructor is no entry.
+      let spread = false;
+      for (const p of node.properties) {
+        if (ts.isSpreadAssignment(p)) spread = true;
+        else if (spread && ts.isPropertyAssignment(p) && mayBeNil(p.initializer)) add("spread-nil", p);
+        else if (spread && ts.isShorthandPropertyAssignment(p) && mayBeNil(p.name)) add("spread-nil", p);
+      }
     } else if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.TildeToken) {
       add("bitwise", node);
     } else if (node.kind === ts.SyntaxKind.RegularExpressionLiteral) {
@@ -101,7 +110,7 @@ test("each rule fires on the fixture's constructs, line by line", () => {
   const sf = program.getSourceFile(FIXTURE)!;
   const want = new Map<number, Rule>();
   sf.text.split("\n").forEach((line, i) => {
-    const tag = line.match(/\/\/ (bitwise|mod|regex|number-to-string|order|typed-array|host|hole)$/);
+    const tag = line.match(/\/\/ (bitwise|mod|regex|number-to-string|order|typed-array|host|hole|spread-nil)$/);
     if (tag) want.set(i + 1, tag[1] as Rule);
   });
   assert.ok(want.size >= 25, `the fixture tags only ${want.size} lines`);
