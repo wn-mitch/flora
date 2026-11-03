@@ -4,6 +4,7 @@
 // target draws alike.
 export { add32, and32, fmt, hypot, mod, mul32, or32, shl32, shr32, sortedKeys, sortNumbers, utf8, xor32 } from "#platform";
 export * as color from "./color.ts";
+export * as compose from "./compose.ts";
 export * as geom from "./geom.ts";
 export { hash, Rng } from "./rng.ts";
 export { CORRIDOR, FREE, OUTSIDE, PLACED, Space, TEXT } from "./space.ts";

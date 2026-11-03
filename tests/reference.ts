@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CASES, lit, type Case } from "./reference-cases.ts";
 import "./reference-frames.ts";
+import "./reference-compose.ts";
 import "./reference-growth.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -113,6 +114,9 @@ function MOCK(H)
   end
   function pt:stroke(cmds, rgb, w, op, o)
     o = o or {}
+    -- With LIST_STROKES set, a list of paths passed without many (the
+    -- leaflet midrib, tikz-flora TASK-40) strokes as the engine does.
+    if LIST_STROKES and type(cmds[1]) == "table" and type(cmds[1][1]) == "table" then o = { many = true } end
     local t = into()
     t[#t + 1] = { kind = "stroke", path = path(o.many and cmds or { cmds }), alpha = math.min(1, op or 1) * self.alpha, rgb = rgb, width = w }
   end

@@ -7,6 +7,7 @@ import * as G from "../../src/engine/geom.ts";
 import { hash, Rng } from "../../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../../src/engine/space.ts";
 import * as LA from "../../src/engine/layout.ts";
+import * as CO from "../../src/engine/compose.ts";
 import * as FR from "../../src/engine/frames.ts";
 import * as ORN from "../../src/engine/ornaments.ts";
 import { Painter } from "../../src/engine/paint.ts";
@@ -206,5 +207,25 @@ for (const k of ORN.SLOT_ORDER.flatMap((slot) => ORN.of(slot))) {
     fs.before?.(pt);
     fs.after?.(pt);
     line(`frames ${layout} paint`, numbers(pt.scene().items));
+  }
+}
+
+// Whole pages, as the sums of blocks of 512 painted numbers (a page paints
+// millions): a body page, part grown, and two of the framed layouts.
+{
+  const lines: LA.Box[] = [];
+  for (let i = 0; i < 40; i++) lines.push({ x0: 162, x1: i === 39 ? 300 : 436, y0: 712 - 12 * i, y1: 720 - 12 * i });
+  const base: FR.FloraSpec = { width: 595, height: 842, text: { x0: 162, y0: 120, x1: 436, y1: 720 }, header_y: 760, seed: 2, lines };
+  const specs: [string, FR.FloraSpec][] = [["left", base], ["grow", { ...base, grow: 0.5 }], ["flank", { ...base, layout: "flank" }], ["scrollwork", { ...base, layout: "scrollwork" }]];
+  for (const [name, spec] of specs) {
+    const p = CO.page(spec);
+    const nums = numbers(p.pt.scene().items);
+    const sums: number[] = [];
+    for (let i = 0; i < nums.length; i += 512) {
+      let s = 0;
+      for (let j = i; j < Math.min(nums.length, i + 512); j++) s += nums[j];
+      sums.push(s);
+    }
+    line(`page ${name}`, [nums.length, p.coverage, sums]);
   }
 }
