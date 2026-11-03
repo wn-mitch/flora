@@ -1,6 +1,6 @@
 // Paths as polylines in device pixels, for renderers that draw triangles.
 
-import { CLOSE, CUBIC, LINE, MOVE, type Path } from "./display.ts";
+import { CLOSE, CUBIC, LINE, MOVE, type Item, type Path } from "./display.ts";
 
 // User units to device pixels: x' = (x - x0) * scale, y' = (y - y0) * scale.
 export interface View {
@@ -64,6 +64,47 @@ export function flatten(path: Path, v: View): Float32Array[] {
 }
 
 // The device-px box [x0, y0, x1, y1] round `subs`, or null when empty.
+// The box [x0, y0, x1, y1] of `path`'s points in user units, or null for
+// a path with none. It holds the whole path, since a cubic stays inside its
+// control points. Kept per path, as a list is often drawn more than once.
+const boxes = new WeakMap<Path, readonly [number, number, number, number] | null>();
+export function pathBox(path: Path): readonly [number, number, number, number] | null {
+  const had = boxes.get(path);
+  if (had !== undefined) return had;
+  const c = path.coords;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i + 1 < c.length; i += 2) {
+    if (c[i] < x0) x0 = c[i];
+    if (c[i] > x1) x1 = c[i];
+    if (c[i + 1] < y0) y0 = c[i + 1];
+    if (c[i + 1] > y1) y1 = c[i + 1];
+  }
+  const box = x0 <= x1 ? ([x0, y0, x1, y1] as const) : null;
+  boxes.set(path, box);
+  return box;
+}
+
+// Whether item `it` can paint any of a w x h device px window under view
+// `v`: false only when its box (a stroke's grown by its half width, a
+// clip's being the clip path's, which holds everything inside it) lies
+// wholly outside, so a renderer may skip it and draw the same picture.
+export function reaches(it: Item, v: View, w: number, h: number): boolean {
+  let box: readonly [number, number, number, number] | null;
+  let pad = 1;
+  if (it.kind === "image") {
+    const [a, b, c, d, e, f] = it.transform;
+    const xs = [e, a + e, c + e, a + c + e], ys = [f, b + f, d + f, b + d + f];
+    box = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+  } else {
+    box = pathBox(it.path);
+    if (it.kind === "stroke") pad += Math.max(it.width * v.scale, 1) / 2;
+  }
+  if (box === null) return false;
+  const s = v.scale;
+  return (box[2] - v.x0) * s + pad >= 0 && (box[0] - v.x0) * s - pad <= w
+    && (box[3] - v.y0) * s + pad >= 0 && (box[1] - v.y0) * s - pad <= h;
+}
+
 export function bounds(subs: readonly Float32Array[], pad = 0): [number, number, number, number] | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const p of subs) {

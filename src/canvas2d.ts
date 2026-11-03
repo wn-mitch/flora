@@ -2,6 +2,7 @@
 // is missing, and the reference the WebGL renderer is tested against.
 
 import { CLOSE, CUBIC, LINE, MOVE, type Blend, type DisplayList, type Image, type Item, type Paint, type Path } from "./display.ts";
+import { reaches } from "./flatten.ts";
 import type { DrawOptions } from "./webgl.ts";
 
 const COMPOSITE: Record<Blend, GlobalCompositeOperation> = { normal: "source-over", multiply: "multiply", screen: "screen" };
@@ -49,8 +50,11 @@ export function drawCanvas2D(ctx: Ctx, list: DisplayList, o: DrawOptions): void 
     for (const st of p.stops) g.addColorStop(Math.min(1, Math.max(0, st.offset)), rgb(st.rgb));
     return g;
   };
+  // Items that cannot reach the canvas are skipped (flatten.ts reaches).
+  const view = { scale: s, x0: o.x0 ?? 0, y0: o.y0 ?? 0 }, W = ctx.canvas.width, H = ctx.canvas.height;
   const draw = (items: readonly Item[]) => {
     for (const it of items) {
+      if (!reaches(it, view, W, H)) continue;
       if (it.kind === "clip") {
         ctx.save();
         ctx.clip(toPath2D(it.path), it.rule);

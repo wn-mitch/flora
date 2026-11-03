@@ -14,7 +14,7 @@
 // has to be written whole.
 
 import type { Blend, DisplayList, Image, Item, Paint, RGB, Rule } from "./display.ts";
-import { bounds, flatten, type View } from "./flatten.ts";
+import { bounds, flatten, reaches, type View } from "./flatten.ts";
 
 const LOW = 0x3f, SHIFT = 6, MAX_DEPTH = 3;
 // The top bits that change between depths d and d + 1.
@@ -52,8 +52,11 @@ class Floats {
   }
 }
 
-// The ops and vertices for `list` under view `v`.
-export function prepare(list: DisplayList, v: View): { ops: Op[]; verts: Float32Array; triangles: number } {
+// The ops and vertices for `list` under view `v`. Given a window `win`
+// (device px), items that cannot reach it are left out (flatten.ts
+// reaches), which draws the same picture for less work when the window
+// shows a part of the list.
+export function prepare(list: DisplayList, v: View, win?: { readonly w: number; readonly h: number }): { ops: Op[]; verts: Float32Array; triangles: number } {
   const buf = new Floats();
   const ops: Op[] = [];
   const fans = (subs: Float32Array[]) => {
@@ -65,6 +68,7 @@ export function prepare(list: DisplayList, v: View): { ops: Op[]; verts: Float32
   };
   const walk = (items: readonly Item[], depth: number) => {
     for (const it of items) {
+      if (win !== undefined && !reaches(it, v, win.w, win.h)) continue;
       if (it.kind === "fill") {
         const subs = flatten(it.path, v);
         const box = bounds(subs);
@@ -206,10 +210,10 @@ export class WebGLRenderer {
     const t0 = performance.now();
     const view = { scale: o.scale, x0: o.x0 ?? 0, y0: o.y0 ?? 0 };
     this.view = view;
-    const { ops, verts, triangles } = prepare(list, view);
-    const t1 = performance.now();
     const gl = this.gl, u = this.u;
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
+    const { ops, verts, triangles } = prepare(list, view, { w: W, h: H });
+    const t1 = performance.now();
     gl.useProgram(this.prog);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);

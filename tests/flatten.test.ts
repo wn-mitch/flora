@@ -51,3 +51,40 @@ test("subpaths split at each move; single points are dropped", () => {
   assert.deepEqual([...subs[0]], [1, 1, 2, 2]);
   assert.equal(bounds([], 0), null);
 });
+
+// Culling: a renderer skips what cannot reach its window and keeps the
+// rest exactly, so a window onto part of a long list costs that part.
+import { prepare } from "../src/webgl.ts";
+import { reaches } from "../src/flatten.ts";
+import type { DisplayList, Item } from "../src/display.ts";
+
+const box = (x0: number, y0: number, x1: number, y1: number) =>
+  new PathBuilder().moveTo(x0, y0).lineTo(x1, y0).lineTo(x1, y1).lineTo(x0, y1).close().build();
+const fill = (x0: number, y0: number, x1: number, y1: number): Item =>
+  ({ kind: "fill", path: box(x0, y0, x1, y1), paint: { kind: "solid", rgb: [0, 0, 0] }, rule: "nonzero", alpha: 1, blend: "multiply" });
+
+test("an item reaches a window only if its box, a stroke's grown by its width, meets it", () => {
+  const v = { scale: 2, x0: 0, y0: 100 };  // the window is user y 100..150 at 100 x 100 px
+  assert.equal(reaches(fill(0, 0, 10, 99), v, 100, 100), false, "wholly above");
+  assert.equal(reaches(fill(0, 151, 10, 200), v, 100, 100), false, "wholly below");
+  assert.equal(reaches(fill(0, 90, 10, 101), v, 100, 100), true, "straddling the top");
+  // A line 4 units above the window, 10 units wide: its ink reaches 1 unit in.
+  const line = new PathBuilder().moveTo(0, 96).lineTo(50, 96).build();
+  assert.equal(reaches({ kind: "stroke", path: line, rgb: [0, 0, 0], width: 10, alpha: 1, blend: "normal" }, v, 100, 100), true, "a wide stroke's edge");
+  assert.equal(reaches({ kind: "stroke", path: line, rgb: [0, 0, 0], width: 1, alpha: 1, blend: "normal" }, v, 100, 100), false, "a thin stroke");
+  // A curve's control point may leave its points' range; the box holds it.
+  const arc = new PathBuilder().moveTo(0, 90).cubicTo(10, 130, 20, 130, 30, 90).build();
+  assert.equal(reaches({ kind: "fill", path: arc, paint: { kind: "solid", rgb: [0, 0, 0] }, rule: "nonzero", alpha: 1, blend: "normal" }, v, 100, 100), true, "a curve bowing in");
+});
+
+test("prepare skips what is out of the window, clips with their contents, and keeps the rest exactly", () => {
+  const inside = fill(5, 110, 20, 130), above = fill(5, 0, 20, 50);
+  const clipOut: Item = { kind: "clip", path: box(0, 300, 50, 400), rule: "nonzero", items: [fill(0, 0, 50, 400)] };
+  const list: DisplayList = { width: 50, height: 400, items: [above, inside, clipOut] };
+  const v = { scale: 2, x0: 0, y0: 100 };
+  const all = prepare(list, v), win = prepare(list, v, { w: 100, h: 100 });
+  assert.equal(all.ops.length, 5, "unculled: two fills, a clip, its fill and its unclip");
+  assert.equal(win.ops.length, 1, "culled: only the fill in the window");
+  const only = prepare({ ...list, items: [inside] }, v);
+  assert.deepEqual([...win.verts], [...only.verts], "the kept fill's geometry is unchanged");
+});
