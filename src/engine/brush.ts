@@ -43,11 +43,19 @@ function offsetBy(pts: readonly Pt[], wfn: (t: number) => number, f: number): Pt
   return pts.map((p, i) => G.polar(p, G.angle(pts[Math.max(0, i - 1)], pts[Math.min(n - 1, i + 1)]) + Math.PI / 2, f * wfn(i / Math.max(1, n - 1))));
 }
 
+// Points to resample a line `len` pt long at: at least `least`, and one
+// every BROKEN_STEP pt, so a long stroke follows its curve rather than
+// cutting chords across it. Taken a hair above the boundary, as in stem.
+const BROKEN_STEP = 6;
+function steps(len: number, least: number): number {
+  return Math.max(least, Math.floor(len / BROKEN_STEP + 1e-6));
+}
+
 // Outlines of one broken stroke along polyline `line`, at most `wmax` pt
 // wide. `gap` (0-1) sets how much of the length is left unpainted; `dry`
 // (0-1) is the chance a piece splits into threads.
 export function broken(rng: Rng, line: readonly Pt[], wmax: number, gap: number, dry: number): Pt[][] {
-  const pts = G.resample(line, 32);
+  const pts = G.resample(line, steps(G.length(line), 32));
   const nz = G.noise(rng, 16);
   const phase = rng.range(0, 16);
   const out: Pt[][] = [];
@@ -56,7 +64,7 @@ export function broken(rng: Rng, line: readonly Pt[], wmax: number, gap: number,
     const t1 = Math.min(1, t + rng.range(0.14, 0.5) * (1 - 0.6 * gap));
     let seg = slice(pts, t, t1);
     if (seg.length >= 2) {
-      seg = G.resample(seg, 10);
+      seg = G.resample(seg, steps(G.length(seg), 10));
       const a = t, b = t1;
       const w = (u: number) => {
         const tt = a + (b - a) * u;

@@ -52,3 +52,21 @@ test("a stem a whole number of brush steps long resamples alike from either side
   eq(short.length, whole.length, "numbers painted");
   for (let i = 0; i < whole.length; i++) near(short[i], whole[i], 1e-6, "number " + fmt(i, 0));
 });
+
+test("a long broken stroke follows its curve instead of cutting chords", () => {
+  // 2000 pt round a circle of radius 200. At a fixed 32 points (10 per
+  // piece) the pieces cut chords ~90 pt long, which leave the circle by
+  // ~5 pt; resampled by length they stay within their width of it.
+  const r = 200, n = 400, len = 2000;
+  const line: Pt[] = [];
+  for (let i = 0; i <= n; i++) {
+    const a = (len / r) * (i / n);
+    line.push([r * Math.cos(a), r * Math.sin(a)]);
+  }
+  const wmax = 0.5;
+  const pieces = BR.broken(new Rng("chords"), line, wmax, 0.3, 0);
+  check(pieces.length > 2, "the stroke breaks into pieces");
+  let worst = 0;
+  for (const p of pieces) for (const q of p) worst = Math.max(worst, Math.abs(Math.sqrt(q[0] * q[0] + q[1] * q[1]) - r));
+  check(worst <= wmax + 0.2, "a piece leaves the curve by " + fmt(worst, 2) + " pt");
+});
