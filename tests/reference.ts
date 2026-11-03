@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CASES, lit, type Case } from "./reference-cases.ts";
 import "./reference-frames.ts";
+import "./reference-growth.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const TIKZ = process.env.TIKZ_FLORA ?? join(ROOT, "..", "tikz-flora");
@@ -51,6 +52,8 @@ LF = require("flora.leaf")
 BR = require("flora.brush")
 GR = require("flora.grow")
 MX = require("flora.mix")
+VI = require("flora.visitor")
+CK = require("flora.clock")
 
 -- A painter that records what it is given as the engine's Painter does
 -- (tests/engine/scenes.ts numbers): every path's verbs and coordinates,

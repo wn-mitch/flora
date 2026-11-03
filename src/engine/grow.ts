@@ -64,6 +64,7 @@ export interface GrowContext {
   readonly leaves: Placed[];
   readonly leaflets: Leaflet[];
   readonly counts: Record<string, number>;                // motifs placed, by kind
+  visitors?: Placed[];                                    // bees, butterflies, birds, snails (visitor.ts)
 }
 
 // A repeatable jitter in [0.85, 1.15) for cell k on pass `iter`, so the

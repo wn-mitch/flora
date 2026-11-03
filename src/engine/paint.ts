@@ -324,6 +324,18 @@ export class Painter {
     });
   }
 
+  // Run fn and withdraw everything it painted: its randomness is spent as
+  // it would be, but nothing shows (clock.ts, an element not yet born).
+  // fn must close every clip and group it opens.
+  withdraw(fn: () => void): void {
+    const into = this.open.length > 0 ? this.open[this.open.length - 1].items : this.root;
+    const n0 = into.length, c0 = this.count, open0 = this.open.length, groups0 = this.groups.length;
+    fn();
+    if (this.open.length !== open0 || this.groups.length !== groups0) throw new Error("paint: withdraw left a clip or group open");
+    while (into.length > n0) into.pop();
+    this.count = c0;
+  }
+
   // Everything painted until clipEnd is clipped to `cmds`.
   clipBegin(cmds: readonly Cmd[]): void {
     const clip: SceneClip = { kind: "clip", path: this.path([cmds]), rule: "nonzero", items: [] };
