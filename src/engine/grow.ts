@@ -329,10 +329,10 @@ function motifs(mw: number, cfg: ComposeCfg, rng: Rng, mix?: Mix): Motif[] {
   const kr = rng.range(cfg.features[0], cfg.features[1]);
   const all: Motif[] = [
     { kind: "bloom", w: 3, cap: cfg.small_blooms, rmin: 9, rmax: mw * 0.13 * kr },
-    { kind: "soft", w: 1.5, cap: 2, rmin: 10, rmax: mw * 0.12 * kr },
-    { kind: "lily", w: 1.2, cap: 1, rmin: 16, rmax: mw * 0.21 * kr },
+    { kind: "soft", w: 1.5, cap: M.motifCap(2, cfg), rmin: 10, rmax: mw * 0.12 * kr },
+    { kind: "lily", w: 1.2, cap: M.motifCap(1, cfg), rmin: 16, rmax: mw * 0.21 * kr },
     { kind: "ghost", w: 1, cap: 1, rmin: 16, rmax: mw * 0.22 * kr, below: 0.4 },
-    { kind: "umbel", w: 1.6, cap: 3, rmin: 12, rmax: mw * 0.19 * kr },
+    { kind: "umbel", w: 1.6, cap: M.motifCap(3, cfg), rmin: 12, rmax: mw * 0.19 * kr },
     { kind: "cyme", w: 3, rmin: 7, rmax: 22, spray: true },
     { kind: "gyps", w: 4, rmin: 5, rmax: 30, spray: true },
   ];

@@ -71,7 +71,7 @@ export function plant(spec: FloraSpec, pt: Painter): Planted {
   const mw = m.x1 - m.x0;
   const top = spec.header_y ?? spec.text.y1;
 
-  const cfg = MX.cfg(COMPOSE, spec.mix);
+  const cfg = MX.budget(MX.cfg(COMPOSE, spec.mix), spec.budget);
   const R = G.clamp(mw * cfg.hero, 28, 80);
   // As in the reference, the hero's heart sits just below the running-head
   // rule, so the bloom fills the top corner of the page up to the paper's

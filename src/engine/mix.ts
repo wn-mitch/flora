@@ -54,6 +54,7 @@ export interface ComposeCfg {
   readonly leaflet_spacing: Range;
   readonly leaflet_size: number;
   readonly no_leaflets?: boolean;
+  readonly budget?: number;
 }
 
 // COMPOSE adjusted by the mix's leaves, leaflets, sprays, curls and
@@ -74,6 +75,22 @@ export function cfg(base: ComposeCfg = COMPOSE, mix?: Mix): ComposeCfg {
     sprays: Math.floor(base.sprays * weight(mix, "sprays") * Math.min(1, k) + 0.5),
     curls: base.curls * weight(mix, "curls"),
   };
+}
+
+// `c` with its caps on how much grows (large leaves, fine sprays, small
+// blooms, and the soft blooms, lilies and umbels, motifCap) scaled by
+// `b`, for a plant longer than a page, which would otherwise run out of
+// growth part way along; `c` itself when b is undefined or 1. Spacing is
+// unchanged, so a longer plant is as full as a page's, not fuller.
+export function budget(c: ComposeCfg, b: number | undefined): ComposeCfg {
+  if (b === undefined || b === 1) return c;
+  const r = (n: number) => Math.max(0, Math.floor(n * b + 0.5));
+  return { ...c, leaves: r(c.leaves), sprays: r(c.sprays), small_blooms: r(c.small_blooms), budget: b };
+}
+
+// A hole motif's cap `n` under cfg's budget (budget above).
+export function motifCap(n: number, c: ComposeCfg): number {
+  return c.budget === undefined ? n : Math.max(1, Math.floor(n * c.budget + 0.5));
 }
 
 // The density field `dens` scaled by the mix's density weight, or `dens`

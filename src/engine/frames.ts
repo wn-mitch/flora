@@ -65,6 +65,7 @@ export interface FloraSpec extends Title.TitleSpec {
   readonly spin?: number | string; // colour spin (mix.ts resolve)
   readonly grow?: number;          // a growth frame, 0-1 (clock.ts)
   readonly backdrop?: RGB;         // the dark ground ink is repainted for
+  readonly budget?: number;        // the caps on growth scaled (mix.ts budget)
 }
 
 // The six numbers of an affine map.

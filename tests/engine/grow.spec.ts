@@ -1,12 +1,15 @@
 // Growth fills the margin without touching the text, respects each
 // motif's cap and the page's mix, and the mix itself scales what it says.
+import { fmt } from "#platform";
+import * as CO from "../../src/engine/compose.ts";
 import * as Fill from "../../src/engine/fill.ts";
 import { ORDER } from "../../src/engine/inks.ts";
 import * as LA from "../../src/engine/layout.ts";
 import * as MX from "../../src/engine/mix.ts";
+import { Painter } from "../../src/engine/paint.ts";
 import { COMPOSE } from "../../src/engine/tune.ts";
 import { check, eq, near, test } from "./harness.ts";
-import { bodySpec, growPage } from "./scenes.ts";
+import { bodySpec, growPage, numbers } from "./scenes.ts";
 
 test("growth fills the margin and keeps every spray off the text", () => {
   const [g, ctx] = growPage("grow 1");
@@ -59,4 +62,33 @@ test("a random palette part resolves to one ink, the same for a seed and spin", 
   check(moved || c.leaves !== a.leaves, "spinning changes the ink");
   eq(MX.resolve(p, "not a number", 0)?.leaves ?? "", MX.resolve(p, 1, 0)?.leaves ?? "-", "a seed that is not a number counts as 1");
   eq(MX.resolve(undefined, 1, 0) === undefined, true, "no palette, none");
+});
+
+// A plant hung down a web page's margin (tikz-flora's site), `h` pt tall.
+function hanging(h: number, budget?: number): [number[], Record<string, number>] {
+  const text = { x0: 116, x1: 146, y0: 24, y1: h - 24 };
+  const pt = new Painter({ width: 146, height: h });
+  const p = CO.plant({ width: 146, height: h, seed: 7, text, lines: [{ ...text }], closed: [], budget }, pt);
+  return [numbers(pt.scene().items), p.counts];
+}
+
+test("a growth budget of 1 changes nothing", () => {
+  const [a, ca] = hanging(1200), [b, cb] = hanging(1200, 1);
+  eq(b.length, a.length, "numbers painted");
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) { eq(b[i], a[i], "number " + fmt(i, 0)); break; }
+  eq(cb.leaves, ca.leaves, "leaves");
+});
+
+test("a long plant runs out of growth at a page's caps, and a budget lets it carry on", () => {
+  // 4000 pt is about five pages of margin: at the page's caps it stops
+  // near COMPOSE.leaves leaves and small_blooms blooms; a budget of 4
+  // lets it grow on down at its own spacing (which, far from the
+  // gesture's bows, is wider: about 1.5 times the leaves, not 4).
+  const [, plain] = hanging(4000), [, more] = hanging(4000, 4);
+  check(plain.leaves <= COMPOSE.leaves + 8, "an unbudgeted plant grows " + fmt(plain.leaves, 0) + " leaves");
+  check(more.leaves > plain.leaves * 1.3, "budget 4: " + fmt(more.leaves, 0) + " leaves against " + fmt(plain.leaves, 0));
+  check((more.bloom ?? 0) > COMPOSE.small_blooms, "budget 4: " + fmt(more.bloom ?? 0, 0) + " small blooms");
+  // The hole motifs' own caps (two soft blooms, three umbels) scale too.
+  check((plain.umbel ?? 0) <= 3 && (more.umbel ?? 0) > 3, "budget 4: " + fmt(more.umbel ?? 0, 0) + " umbels");
+  check((plain.soft ?? 0) <= 2 && (more.soft ?? 0) > 2, "budget 4: " + fmt(more.soft ?? 0, 0) + " soft blooms");
 });
