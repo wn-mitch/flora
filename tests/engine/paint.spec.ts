@@ -184,3 +184,20 @@ test("metal keeps its colour and blend on a dark backdrop", () => {
   eq(metal.blend, "multiply", "and its blend");
   check(ink.paint.rgb[0] !== PAL.blue[0] && ink.blend === "screen", "ink turns over");
 });
+
+test("a painter's own paper takes the place of PAL.paper, and only on light paper", () => {
+  const own: [number, number, number] = [0.96, 0.94, 0.9];
+  const fillOf = (pt: Painter, rgb: [number, number, number]) => {
+    pt.fill([["m", 0, 0], ["l", 1, 0], ["l", 1, 1], ["z"]], rgb, 1);
+    const it = pt.scene().items[0];
+    return it.kind === "fill" && it.paint.kind === "solid" ? it.paint.rgb : undefined;
+  };
+  const p1 = fillOf(new Painter({ width: 10, height: 10, paper: own }), PAL.paper);
+  eqList(p1 ?? [], own, "knockout in the page's paper");
+  const p2 = fillOf(new Painter({ width: 10, height: 10, paper: own }), PAL.blue);
+  eqList(p2 ?? [], PAL.blue, "other ink unchanged");
+  const p3 = fillOf(new Painter({ width: 10, height: 10 }), PAL.paper);
+  eqList(p3 ?? [], PAL.paper, "no paper given: PAL.paper");
+  const p4 = fillOf(new Painter({ width: 10, height: 10, paper: own, backdrop: DARK_GROUND }), PAL.paper);
+  check(p4 !== undefined && lightness(p4) < 0.5, "on a dark backdrop the paper is the backdrop's");
+});

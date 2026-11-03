@@ -25,6 +25,7 @@ import { PAL, Painter } from "./paint.ts";
 import * as P from "./plant.ts";
 import type { Stem } from "./plant.ts";
 import { Rng } from "./rng.ts";
+import type { Space } from "./space.ts";
 import * as S from "./sprig.ts";
 import { COMPOSE, HERO, PALETTE, PLANT } from "./tune.ts";
 import * as Visitor from "./visitor.ts";
@@ -44,8 +45,13 @@ interface Piece {
 // it filled, the hero bloom [x, y, R], the cartouche's panel [cx, cy, w, h],
 // the ghost bloom [x, y, r], motifs placed by kind (with `leaves`, the large
 // leaves) and the sparkles strewn. Positions are in the frame's own page.
+// `space` and `stems` are the plant's grid and stems, as a GrowthClock
+// (clock.ts) is built over them, for a caller that reveals the finished
+// page itself.
 export interface Planted {
   readonly coverage: number;
+  readonly space: Space;
+  readonly stems: readonly StemLike[];
   readonly hero: [number, number, number];
   readonly panel?: [number, number, number, number];
   readonly ghost?: [number, number, number];
@@ -295,7 +301,7 @@ export function plant(spec: FloraSpec, pt: Painter): Planted {
   pt.clock = undefined;
   const counts = ctx.counts;
   counts.leaves = ctx.leaves.length;
-  return { coverage: g.coverage(), hero, panel, ghost, counts, sparkles };
+  return { coverage: g.coverage(), space: g, stems, hero, panel, ghost, counts, sparkles };
 }
 
 // A page planned and painted: its painter, how much of its margins the

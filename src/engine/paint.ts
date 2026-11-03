@@ -113,6 +113,10 @@ export interface PainterOptions {
   // growth there is (tune.ts MIX); the defaults when undefined.
   readonly palette?: Palette;
   readonly mix?: Readonly<Record<string, number>>;
+  // The paper the page is shown on, when it is not PAL.paper (a web page's
+  // own): what knocks out under a petal paints in it, so no paler halo
+  // shows. On a dark backdrop it is unused; the backdrop is the paper.
+  readonly paper?: RGB;
 }
 
 // The Bezier arcs of a circle, starting and ending at (x + r, y): four
@@ -141,6 +145,7 @@ export class Painter {
   readonly backdrop: RGB | undefined;
   readonly palette: Palette;
   readonly mix: Readonly<Record<string, number>>;
+  readonly paper: RGB | undefined;
   // Painted items, for diagnostics.
   count = 0;
   // While set, batched line work paints only what the front has reached
@@ -168,6 +173,7 @@ export class Painter {
     this.backdrop = o.backdrop;
     this.palette = o.palette ?? PALETTE;
     this.mix = o.mix ?? MIX;
+    this.paper = o.paper;
   }
 
   // The weight of growth `kind` in this painter's mix (1 when unset).
@@ -175,10 +181,12 @@ export class Painter {
     return this.mix[kind] ?? MIX[kind] ?? 1;
   }
 
-  // `rgb` as it is painted: itself on white paper; on a dark backdrop, its
-  // lightness turned over (color.ts onGround), unless it is one of KEEP.
+  // `rgb` as it is painted: itself on white paper (PAL.paper itself as the
+  // painter's own paper, when it has one); on a dark backdrop, its lightness
+  // turned over (color.ts onGround), unless it is one of KEEP.
   ink(rgb: RGB): RGB {
     const bd = this.backdrop;
+    if (bd === undefined && rgb === PAL.paper && this.paper !== undefined) return this.paper;
     if (bd === undefined || this.metal > 0 || KEEP.includes(rgb)) return rgb;
     const key = fmt(rgb[0], 4) + "," + fmt(rgb[1], 4) + "," + fmt(rgb[2], 4);
     let c = this.inked[key];
