@@ -1,5 +1,8 @@
 // Colour in OKLCH (hue in degrees) and gamma-encoded sRGB [r, g, b] in [0, 1].
 import { hypot, mod } from "#platform";
+import { GROUPS, RAMPS } from "./inks.ts";
+import type { Rng } from "./rng.ts";
+import { COLOR, PALETTE, type Palette, type Range } from "./tune.ts";
 
 export type RGB = [number, number, number];
 
@@ -116,4 +119,146 @@ export function onGround(rgb: RGB, ground: RGB, paper: RGB): RGB {
   const [L, Ch, h] = lch(rgb);
   const t = Math.max(0, Math.min(1, (Lp - L) / Lp)) ** LIFT;
   return oklch(Lg + t * (GLOW - Lg), Ch, h);
+}
+
+const pick = (rng: Rng, r: Range) => rng.range(r[0], r[1]);
+
+// Index of the most chromatic stop of each ink's ramp, found when first
+// asked for. Darker than that stop the colour is held there: the densest
+// strokes of some scans turn off-hue (sheen), and dark stems would
+// otherwise pick that up.
+const richest: Record<string, number> = {};
+function richestOf(name: string): number {
+  const known = richest[name];
+  if (known !== undefined) return known;
+  let best = -1, bi = 0;
+  RAMPS[name].forEach((s, i) => {
+    const c = s[1] * s[1] + s[2] * s[2];
+    if (c > best) {
+      best = c;
+      bi = i;
+    }
+  });
+  richest[name] = bi;
+  return bi;
+}
+
+// The ink `name`'s colour where its wash has lightness L, as OKLCH chroma
+// and hue: its measured ramp interpolated by lightness from its richest
+// stop to its palest, held at either end beyond that.
+export function inkAt(name: string, L: number): [number, number] {
+  const r = RAMPS[name].slice(richestOf(name));
+  const lo = r[0], hi = r[r.length - 1];
+  let a = hi[1], b = hi[2];
+  if (L <= lo[0]) {
+    a = lo[1];
+    b = lo[2];
+  } else if (L < hi[0]) {
+    for (let i = 0; i < r.length - 1; i++) {
+      const p = r[i], q = r[i + 1];
+      if (L >= p[0] && L <= q[0]) {
+        const t = (L - p[0]) / Math.max(1e-9, q[0] - p[0]);
+        a = p[1] + (q[1] - p[1]) * t;
+        b = p[2] + (q[2] - p[2]) * t;
+        break;
+      }
+    }
+  }
+  return [Math.sqrt(a * a + b * b), mod(Math.atan2(b, a) * DEG, 360)];
+}
+
+// The ink a shape is painted with, for palette choice `choice`: undefined
+// for "look" (the look's own gradient), a member of an ink group picked
+// with `rng` (the group's first without one), or the named ink.
+export function inkFor(rng: Rng | undefined, choice: string | undefined): string | undefined {
+  if (choice === undefined || choice === "look") return undefined;
+  const g = GROUPS[choice];
+  if (g !== undefined) return g[rng === undefined ? 0 : rng.int(0, g.length - 1)];
+  if (RAMPS[choice] !== undefined) return choice;
+  return undefined;
+}
+
+// sRGB for ink `name` at lightness L, its chroma scaled by `share`.
+export function inkRgb(name: string, L: number, share = 1): RGB {
+  const [ch, h] = inkAt(name, L);
+  return oklch(L, ch * share, h);
+}
+
+// Which palette part a look paints by default.
+const PART: Readonly<Record<string, string>> = { leaf: "leaves", hero: "hero", vivid: "blooms", fan: "blooms", soft: "blooms", ghost: "ghost" };
+
+export function partOf(look: string): string | undefined {
+  return PART[look];
+}
+
+// The one ink that recolours part `part`'s fixed pigments (rim pools,
+// florets, the cartouche), without spending randomness: the named ink, or
+// the first ink of a group. Undefined for "look" and for the blue group,
+// whose inks the fixed blue pigments already match.
+export function partInk(part: string | undefined, palette: Palette = PALETTE): string | undefined {
+  const choice = part === undefined ? undefined : palette[part];
+  if (choice === undefined || choice === "look" || choice === "blue") return undefined;
+  if (RAMPS[choice] !== undefined) return choice;
+  const g = GROUPS[choice];
+  return g === undefined ? undefined : g[0];
+}
+
+// `rgb` repainted in ink `ink` at the same lightness, or `rgb` itself when
+// there is no ink or the ink is one of the blues.
+export function recolor(rgb: RGB, ink: string | undefined): RGB {
+  if (ink === undefined || GROUPS.blue.includes(ink)) return rgb;
+  return inkRgb(ink, lightness(rgb), 1);
+}
+
+export type Stops = [number, RGB][];
+
+// What a ramp's shape was painted with, for matching glazes: its hue, its
+// tip lightness, its share of the chroma sRGB allows, and its ink if any.
+export interface RampInfo {
+  readonly h: number;
+  readonly L: number;
+  readonly share: number;
+  readonly ink?: string;
+}
+
+// A base-to-tip ramp for one shape of look `look` ("vivid", "soft", "ghost",
+// "leaf", ...). Lightness falls from base to tip along t^curve; chroma is a
+// fixed share of what sRGB allows at each step, so pale tones stay blue
+// rather than grey; hue drifts from cerulean at the base to the shape's own
+// hue at the tip. When `palette` names an ink (or ink group) for `part`
+// (default: the look's own part), lightness still follows the look but
+// colour comes from the ink's measured ramp at each lightness, so the hue
+// and saturation shift as the ink thins, as a real wash does.
+export function ramp(rng: Rng, look: string, palette: Palette = PALETTE, part?: string): [Stops, RampInfo] {
+  const cfg = COLOR;
+  const lk = cfg.looks[look] ?? cfg.looks.vivid;
+  const h = cfg.hue + rng.jit(cfg.hue_jitter);
+  const baseL = pick(rng, lk.base_l), tipL = pick(rng, lk.tip_l);
+  let share = pick(rng, lk.chroma);
+  const curve = pick(rng, lk.curve);
+  let grey = 1;
+  if (look === "leaf" && rng.chance(cfg.grey_chance)) {
+    grey = cfg.grey_share;
+    share = share * cfg.grey_share;
+  }
+  const stops: Stops = [];
+  const n = 8;
+  const key = part ?? PART[look];
+  const ink = inkFor(rng, key === undefined ? undefined : palette[key]);
+  if (ink !== undefined) {
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      stops.push([t, inkRgb(ink, baseL + (tipL - baseL) * t ** curve, grey)]);
+    }
+    const [ch, ih] = inkAt(ink, tipL);
+    return [stops, { h: ih, L: tipL, share: Math.min(1, (ch * grey) / Math.max(1e-6, maxChroma(tipL, ih))), ink }];
+  }
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const L = baseL + (tipL - baseL) * t ** curve;
+    const hh = h + cfg.hue_drift * (1 - t);
+    const s = share * (0.55 + 0.45 * t);
+    stops.push([t, oklch(L, s * maxChroma(L, hh), hh)]);
+  }
+  return [stops, { h, L: tipL, share }];
 }

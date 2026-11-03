@@ -7,6 +7,7 @@ import * as G from "../../src/engine/geom.ts";
 import { hash, Rng } from "../../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../../src/engine/space.ts";
 import type { Cmd, Pt } from "../../src/engine/geom.ts";
+import { grow, numbers } from "./scenes.ts";
 
 type Flat = number | boolean | string | readonly Flat[];
 
@@ -123,4 +124,12 @@ for (let k = 0; k < 4; k++) {
   for (const [x, y] of probes) v.push(s.room(x, y));
   v.push(s.freeCells(6), s.coverage(), s.maxf);
   line("space", v);
+}
+
+// Whole leaves with their washes, a few numbers to a line so a difference
+// is easy to place.
+for (const [seed, len, ang] of [["agree 1", 110, 1.3], ["agree 2", 40, 2.2], ["agree 3", 150, 0.6]] as const) {
+  const v = numbers(grow(seed, len, ang).items);
+  line(`leaf ${seed} count`, [v.length]);
+  for (let i = 0; i < v.length; i += 64) line(`leaf ${seed} ${fmt(i, 0)}`, v.slice(i, i + 64));
 }
