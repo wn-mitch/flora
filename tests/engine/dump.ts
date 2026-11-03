@@ -7,6 +7,7 @@ import * as G from "../../src/engine/geom.ts";
 import { hash, Rng } from "../../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../../src/engine/space.ts";
 import * as LA from "../../src/engine/layout.ts";
+import * as FR from "../../src/engine/frames.ts";
 import * as ORN from "../../src/engine/ornaments.ts";
 import { Painter } from "../../src/engine/paint.ts";
 import type { Cmd, Pt } from "../../src/engine/geom.ts";
@@ -177,11 +178,33 @@ for (const { seed, mix } of [{ seed: "agree 1" }, { seed: "agree 2", mix: { lily
   line(`grow ${seed} coverage`, [g.coverage()]);
 }
 
-// Flourishes and corners, gilt in relief, a corner mirrored: every number
+// Every ornament kind, gilt in relief, a corner mirrored: every number
 // painted.
-for (const k of [...ORN.of("flourish"), ...ORN.of("corner")]) {
+for (const k of ORN.SLOT_ORDER.flatMap((slot) => ORN.of(slot))) {
   const pt = new Painter({ width: 300, height: 300 });
-  const box: ORN.Box = k.slot === "corner" ? [100, 100, 172, 172] : [20, 120, 280, 166];
+  const box: ORN.Box = k.slot === "corner" ? [100, 100, 172, 172] : k.slot === "flourish" ? [20, 120, 280, 166] : [100, 100, 160, 180];
   ORN.draw(k, pt, new Rng(k.name), box, k.slot === "corner" ? { flip: [-1, 1] } : {});
   line(`ornament ${k.name}`, numbers(pt.scene().items));
+}
+
+// Every layout of a title page: where each frame's projections send probe
+// points, and what the layout paints round the plants.
+{
+  const lines: LA.Box[] = [];
+  for (let i = 0; i < 3; i++) lines.push({ x0: 200, x1: 398, y0: 690 - 30 * i, y1: 710 - 30 * i });
+  for (let i = 0; i < 26; i++) lines.push({ x0: 162, x1: 436, y0: 520 - 14 * i, y1: 529 - 14 * i });
+  for (const layout of FR.ORDER) {
+    const fs = FR.of({ width: 595, height: 842, text: { x0: 162, y0: 120, x1: 436, y1: 720 }, header_y: 760, seed: 7, lines, layout });
+    for (let i = 0; i < fs.frames.length; i++) {
+      const f = fs.frames[i];
+      const t = f.spec.text;
+      const fn = f.fn, inv = f.inv;
+      line(`frames ${layout} ${fmt(i, 0)}`, [f.spec.width, f.spec.height, t.x0, t.y0, t.x1, t.y1,
+        fn === undefined ? [] : [fn(0, 0), fn(40, 120), fn(150, 400)], inv === undefined ? [] : [inv(60, 300), inv(297, 600)]]);
+    }
+    const pt = new Painter({ width: 595, height: 842 });
+    fs.before?.(pt);
+    fs.after?.(pt);
+    line(`frames ${layout} paint`, numbers(pt.scene().items));
+  }
 }

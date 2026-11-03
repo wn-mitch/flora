@@ -10,6 +10,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CASES, lit, type Case } from "./reference-cases.ts";
+import "./reference-frames.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const TIKZ = process.env.TIKZ_FLORA ?? join(ROOT, "..", "tikz-flora");

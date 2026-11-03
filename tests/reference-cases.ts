@@ -16,6 +16,7 @@ import * as RN from "../src/engine/orn_roundel.ts";
 import * as SC from "../src/engine/orn_scroll.ts";
 import * as ORN from "../src/engine/ornaments.ts";
 import * as PEN from "../src/engine/orn_pen.ts";
+import * as AC from "../src/engine/orn_acanthus.ts";
 import { PAL, Painter } from "../src/engine/paint.ts";
 import { PLANT } from "../src/engine/tune.ts";
 import { numbers } from "./engine/scenes.ts";
@@ -50,7 +51,7 @@ export function lit(v: unknown): string {
 }
 
 export const CASES: Case[] = [];
-const add = (name: string, ts: () => unknown, lua: string, tol?: number) => CASES.push({ name, ts, lua, tol });
+export const add = (name: string, ts: () => unknown, lua: string, tol?: number) => CASES.push({ name, ts, lua, tol });
 
 const gen = new Rng("reference cases");
 const num = (a: number, b: number) => gen.range(a, b);
@@ -391,6 +392,12 @@ scene("paint scroll", (pt) => { SC.scroll(pt, [50, 50], 0.3, 40, 1, 3); SC.scrol
   add("geom pen pointed", () => PEN.pointed(pts, { taper: 0.1, down: -2 }),
     `(function() ${lp}; return P.pointed(pts, { taper = 0.1, down = -2 }) end)()`);
 }
+// The acanthus leaf: outline, veins and eyes, at its defaults and with
+// fewer, wider lobes and a curl the other way; then painted.
+add("geom acanthus leaf", () => [AC.leaf([10, 20], 0.4, 60), AC.leaf([0, 0], 2, 30, { curl: -0.3, lobes: 3, wide: 0.3 })],
+  `(function() local A = require("flora.orn_acanthus"); return {{A.leaf({10, 20}, 0.4, 60)}, {A.leaf({0, 0}, 2, 30, { curl = -0.3, lobes = 3, wide = 0.3 })}} end)()`);
+scene("paint acanthus leaves", (pt) => { const [l, v, e] = AC.leaf([100, 100], 1, 80); AC.paintLeaves(pt, [l], v, 80, e); },
+  `local A = require("flora.orn_acanthus"); local l, v, e = A.leaf({100, 100}, 1, 80); A.paint_leaves(pt, {l}, v, 80, e)`);
 // Flourishes and corners in boxes of their slots' shape, under several
 // seeds so each kind's forms (ink or gilt, mirrored or turned, the
 // swelled rule's four) all come up; corners also mirrored into other

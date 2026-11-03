@@ -2,6 +2,7 @@
 // so), and drawing a kind with its gold gilt. To add a kind, register it
 // from a module's register function and call that here.
 import { GILDER } from "./orn_gild.ts";
+import { registerAcanthus } from "./orn_acanthus.ts";
 import { registerCelestial } from "./orn_celestial.ts";
 import { registerClassic } from "./orn_classic.ts";
 import { registerCorner } from "./orn_corner.ts";
@@ -28,6 +29,7 @@ export function registerAll(): void {
   registerRoundel();
   registerPieces();
   registerFlourish();
+  registerAcanthus();
   registerCorner();
   registerGilt();
 }

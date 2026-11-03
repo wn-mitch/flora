@@ -107,7 +107,7 @@ export function motif(m: Motif, mix?: Mix): Motif | undefined {
 
 // A seed as a number, as Lua's tonumber reads it; undefined when it is not
 // one.
-function toNumber(v: string | number | undefined): number | undefined {
+export function toNumber(v: string | number | undefined): number | undefined {
   if (typeof v === "number") return v;
   if (v === undefined) return undefined;
   const n = Number(v);
