@@ -273,20 +273,6 @@ export function slot(n: number, gap: number, spacing: number): number {
   return Math.tan(Math.max(0.05, PI / n - spacing)) * (1 - gap);
 }
 
-// Sorts `xs` in place, stably, by key(x) ascending (an insertion sort: a
-// bloom has a handful of petals).
-function sortBy<T>(xs: T[], key: (x: T) => number): void {
-  for (let i = 1; i < xs.length; i++) {
-    const x = xs[i], k = key(x);
-    let j = i - 1;
-    while (j >= 0 && key(xs[j]) > k) {
-      xs[j + 1] = xs[j];
-      j--;
-    }
-    xs[j + 1] = x;
-  }
-}
-
 export interface BloomOptions {
   // A bloom style (tune.ts BLOOMS): sets the petal kind, look, count,
   // width, rim, rays and veins, each drawn per bloom. The rest override it.
@@ -330,7 +316,7 @@ export function bloom(pt: Painter, rng: Rng, cx: number, cy: number, R: number, 
   }
   // A tilted bloom paints its far (upper) petals first, so the near ones
   // overlap them.
-  if (o.far_first === true) sortBy(petals, (p) => -Math.sin(p.a));
+  if (o.far_first === true) G.sortBy(petals, (p) => -Math.sin(p.a));
   for (const pe of petals) {
     const r = pe.r;
     const L = R * r.range(1 - ragged * 1.5, 1 + ragged * 0.5);
@@ -400,7 +386,7 @@ export function tilted(pt: Painter, rng: Rng, cx: number, cy: number, R: number,
     }
     petals.push({ poly, z: zsum / pts.length, L, r });
   }
-  sortBy(petals, (p) => p.z);
+  G.sortBy(petals, (p) => p.z);
   for (const p of petals) washPetal(pt, p.r, p.poly, p.L, [cx, cy], look);
   const e = project(0, 0)[0];
   eye(pt, rng.fork("eye"), e[0], e[1], R * 0.7, { halo: 0.3, stamens: 9 });

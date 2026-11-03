@@ -5,6 +5,7 @@
 import * as C from "../src/engine/color.ts";
 import * as D from "../src/engine/dist.ts";
 import * as F from "../src/engine/flower.ts";
+import * as LA from "../src/engine/layout.ts";
 import * as SP from "../src/engine/sprig.ts";
 import { SIZES } from "../src/engine/tune.ts";
 import * as G from "../src/engine/geom.ts";
@@ -216,4 +217,41 @@ for (const seed of ["spray 1", "spray 2"]) {
   const stem = walk(30);
   add(`sprig leaflets ${seed}`, () => SP.leafletItems(new Rng(seed), stem, [12, 20], 14),
     `SP.leaflet_items(R.new(${lit(seed)}), ${lit(stem)}, {12, 20}, 14)`);
+}
+
+// Page planning: a body page with a short last paragraph, and a page whose
+// text stops well short of the foot (an excursion).
+{
+  const lines = (n: number, top: number, last: number) => Array.from({ length: n }, (_, i) => ({ x0: 162, x1: i === n - 1 ? last : 436, y0: top - 12 * i, y1: top - 12 * i + 8 }));
+  const pages = [
+    { name: "body", spec: { width: 595, height: 842, text: { x0: 162, y0: 120, x1: 436, y1: 720 }, header_y: 760, lines: lines(48, 712, 300) } },
+    { name: "short", spec: { width: 595, height: 842, text: { x0: 162, y0: 120, x1: 436, y1: 720 }, lines: lines(20, 712, 380), edge: 14, gutter: 10 } },
+    { name: "bare", spec: { width: 420, height: 595, text: { x0: 140, y0: 90, x1: 380, y1: 520 }, bare: true, gather: 60 } },
+  ];
+  const probes = points(60, 300).map(([x, y]) => [x + 300, y + 420] as Pt);
+  const LUA_STEMS = `local function stems(out) local t = {}; for i, st in ipairs(out) do local ws = {}; for k = 0, 10 do ws[#ws + 1] = st.width(k / 10) end; t[i] = {st.pts, ws, st.kind or NULL, st.tip or NULL} end; return t end`;
+  for (const { name, spec } of pages) {
+    add(`layout region ${name}`, () => {
+      const [g, m] = LA.region(spec);
+      return [[m.x0, m.x1, m.y0, m.y1, m.foot], probes.map(([x, y]) => [g.free(x, y), g.textAt(x, y), g.openAt(x, y)])];
+    }, `(function() local g, m = LA.region(${lit(spec)}); local out = {}; for i, p in ipairs(${lit(probes)}) do out[i] = {g:free(p[1], p[2]) and true or false, g:text_at(p[1], p[2]), g:open_at(p[1], p[2])} end; return {{m.x0, m.x1, m.y0, m.y1, m.foot}, out} end)()`);
+    const mw = spec.text.x0 - (spec.gutter ?? 9) - (spec.edge ?? 16);
+    const hero = [ (spec.edge ?? 16) + mw * 0.5, spec.height * 0.72, mw * 0.5 ] as const;
+    const ys = Array.from({ length: 30 }, (_, i) => 40 + i * 20);
+    for (const avoid of [undefined, [40, 300, 90, 370] as const]) {
+      const tag = `${name}${avoid ? " avoid" : ""}`;
+      add(`layout strands ${tag}`, () => {
+        const [, m] = LA.region(spec);
+        const [out, corner, gest] = LA.strands(new Rng(tag), m, hero, spec.width, undefined, avoid);
+        const stems = out.map((st) => [st.pts, Array.from({ length: 11 }, (_, k) => st.width(k / 10)), st.kind ?? null, st.tip ?? null]);
+        return [stems, corner, gest.bows.map((b) => [b.y, b.amp, b.h]), gest.quiet, ys.map((y) => [gest.bow(y), gest.density(60, y)])];
+      }, `(function() ${LUA_STEMS}; local g, m = LA.region(${lit(spec)}); local out, corner, gest = LA.strands(R.new(${lit(tag)}), m, ${lit(hero)}, ${spec.width}, nil, ${avoid ? lit(avoid) : "nil"}); local bows = {}; for i, b in ipairs(gest.bows) do bows[i] = {b.y, b.amp, b.h} end; local d = {}; for i, y in ipairs(${lit(ys)}) do d[i] = {gest.bow(y), gest.density(60, y)} end; return {stems(out), corner, bows, gest.quiet, d} end)()`);
+    }
+    const root = [spec.width * 0.64, 26] as Pt;
+    add(`layout runners ${name}`, () => { const [g, m] = LA.region(spec); return LA.runners(m, root, spec.width, spec.edge ?? 16, g).map((r) => [r.pts, r.width(0.5)]); },
+      `(function() local g, m = LA.region(${lit(spec)}); local out = {}; for i, r in ipairs(LA.runners(nil, m, ${lit(root)}, ${spec.width}, ${spec.edge ?? 16}, g)) do out[i] = {r.pts, r.width(0.5)} end; return out end)()`);
+    add(`layout excursion ${name}`, () => { const e = LA.excursion(new Rng(name), spec, root); return e === undefined ? null : [e.pts, e.width(0.25)]; },
+      `(function() local e = LA.excursion(R.new(${lit(name)}), ${lit(spec)}, ${lit(root)}); if not e then return NULL end; return {e.pts, e.width(0.25)} end)()`);
+  }
+  add("layout cartouche", () => [LA.cartoucheSize(148), LA.cartoucheSize(40, 2), LA.cartoucheSize(300)], "{{LA.cartouche_size(148)}, {LA.cartouche_size(40, 2)}, {LA.cartouche_size(300)}}");
 }

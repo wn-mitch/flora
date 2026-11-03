@@ -6,6 +6,7 @@ import * as C from "../../src/engine/color.ts";
 import * as G from "../../src/engine/geom.ts";
 import { hash, Rng } from "../../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../../src/engine/space.ts";
+import * as LA from "../../src/engine/layout.ts";
 import type { Cmd, Pt } from "../../src/engine/geom.ts";
 import { blooms, grow, numbers, sprays } from "./scenes.ts";
 
@@ -144,4 +145,21 @@ for (const seed of ["agree 1", "agree 2"]) {
   const v = numbers(sprays(seed).items);
   line(`sprays ${seed} count`, [v.length]);
   for (let i = 0; i < v.length; i += 64) line(`sprays ${seed} ${fmt(i, 0)}`, v.slice(i, i + 64));
+}
+
+// A page's stems: every point and width of each, a stem to a line.
+{
+  const lines: LA.Box[] = [];
+  for (let i = 0; i < 40; i++) lines.push({ x0: 162, x1: i === 39 ? 300 : 436, y0: 712 - 12 * i, y1: 720 - 12 * i });
+  const spec: LA.PageSpec = { width: 595, height: 842, text: { x0: 162, y0: 120, x1: 436, y1: 720 }, lines };
+  const [g, m] = LA.region(spec);
+  line("layout coverage", [g.coverage(), g.freeCells(9).length]);
+  const [stems, corner] = LA.strands(new Rng("agree"), m, [84.5, 606, 68.5], 595, undefined, [40, 300, 90, 370]);
+  line("layout corner", corner);
+  for (let i = 0; i < stems.length; i++) {
+    const st = stems[i];
+    const ws: number[] = [];
+    for (let k = 0; k <= 10; k++) ws.push(st.width(k / 10));
+    line(`layout stem ${fmt(i, 0)}`, [st.kind ?? "main", st.pts, ws]);
+  }
 }

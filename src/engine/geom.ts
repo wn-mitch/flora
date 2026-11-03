@@ -440,3 +440,18 @@ export function follow(guide: readonly Pt[], ahead: number, finish = 2): (q: Pt)
     return guide[k];
   };
 }
+
+// Sorts `xs` in place, stably, by key(x) ascending: an insertion sort, for
+// the short lists the generator orders (petals, text lines). Lua's
+// table.sort is not stable, so engine code sorts records only through this.
+export function sortBy<T>(xs: T[], key: (x: T) => number): void {
+  for (let i = 1; i < xs.length; i++) {
+    const x = xs[i], k = key(x);
+    let j = i - 1;
+    while (j >= 0 && key(xs[j]) > k) {
+      xs[j + 1] = xs[j];
+      j--;
+    }
+    xs[j + 1] = x;
+  }
+}
