@@ -82,6 +82,12 @@ const KEEP = [PAL.gold, PAL.copper, PAL.white];
 // A map from the generator's coordinates to the page's (Painter.project).
 export type Projection = (this: void, x: number, y: number) => Pt;
 
+// A growth clock (the "watch it grow" frames): whether the growth front
+// has reached (x, y).
+export interface Clock {
+  born(x: number, y: number): boolean;
+}
+
 export interface PaintOptions {
   // `blend` multiply or screen; `evenodd` fills under the even-odd rule.
   readonly blend?: Blend;
@@ -128,6 +134,9 @@ export class Painter {
   readonly mix: Readonly<Record<string, number>>;
   // Painted items, for diagnostics.
   count = 0;
+  // While set, batched line work paints only what the front has reached
+  // (sprig.ts Batch.paint).
+  clock: Clock | undefined;
   private root: SceneItem[] = [];
   private open: SceneClip[] = [];
   private inked: Record<string, RGB> = {};

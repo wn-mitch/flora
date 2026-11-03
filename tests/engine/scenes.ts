@@ -1,7 +1,8 @@
 // Scenes the engine's tests and tests/agreement.ts grow, and every number
 // one holds, for comparing scenes number by number.
 import * as F from "../../src/engine/flower.ts";
-import { leaf, options } from "../../src/engine/leaf.ts";
+import { leaf, leaflets, options } from "../../src/engine/leaf.ts";
+import * as S from "../../src/engine/sprig.ts";
 import { Painter, type Scene, type SceneItem } from "../../src/engine/paint.ts";
 import { Rng } from "../../src/engine/rng.ts";
 
@@ -22,6 +23,22 @@ export function blooms(seed: string, style: string): Scene {
   F.tilted(pt, r.fork("lily"), 80, 220, 30, 2.1, 1.0, { kind: "lance", petals: 6, width: 0.36 });
   F.bud(pt, 220, 60, 0.7, 14);
   F.florets(pt, [{ x: 150, y: 40, r: 2, rot: 0.3, tint: 1 }, { x: 160, y: 44, r: 0.8, tint: 3 }, { x: 170, y: 40, r: 1.6, soft: true }]);
+  return pt.scene();
+}
+
+// Sprays on one page: an umbel, a cyme, baby's breath, a stem with
+// leaflets and a flourish, batched and painted together.
+export function sprays(seed: string): Scene {
+  const pt = new Painter({ width: 300, height: 300 });
+  const r = new Rng(seed);
+  const b = new S.Batch();
+  S.umbel(b, r.fork("umbel"), [80, 60], 1.5, 50);
+  S.cyme(b, r.fork("cyme"), [200, 60], 1.2, 60, 1);
+  S.gypsophila(b, r.fork("gyps"), [150, 150], 1.7, 34, 4);
+  const stem = S.flourish([40, 200], 0.4, 120, -1);
+  b.stem(stem, 1.4, 0.4);
+  leaflets(pt, r.fork("leaflets"), S.leafletItems(r.fork("items"), stem, [18, 28], 14));
+  b.paint(pt);
   return pt.scene();
 }
 

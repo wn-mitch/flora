@@ -7,7 +7,7 @@ import * as G from "../../src/engine/geom.ts";
 import { hash, Rng } from "../../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../../src/engine/space.ts";
 import type { Cmd, Pt } from "../../src/engine/geom.ts";
-import { blooms, grow, numbers } from "./scenes.ts";
+import { blooms, grow, numbers, sprays } from "./scenes.ts";
 
 type Flat = number | boolean | string | readonly Flat[];
 
@@ -138,4 +138,10 @@ for (const [seed, style] of [["agree 1", "wedge"], ["agree 2", "fan"], ["agree 3
   const v = numbers(blooms(seed, style).items);
   line(`blooms ${seed} count`, [v.length]);
   for (let i = 0; i < v.length; i += 64) line(`blooms ${seed} ${fmt(i, 0)}`, v.slice(i, i + 64));
+}
+
+for (const seed of ["agree 1", "agree 2"]) {
+  const v = numbers(sprays(seed).items);
+  line(`sprays ${seed} count`, [v.length]);
+  for (let i = 0; i < v.length; i += 64) line(`sprays ${seed} ${fmt(i, 0)}`, v.slice(i, i + 64));
 }

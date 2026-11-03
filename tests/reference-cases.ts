@@ -3,7 +3,10 @@
 // tikz-flora's modules R (rng), G (geom), C (color) and S (space). Inputs
 // come from a fixed stream, so every run checks the same cases.
 import * as C from "../src/engine/color.ts";
+import * as D from "../src/engine/dist.ts";
 import * as F from "../src/engine/flower.ts";
+import * as SP from "../src/engine/sprig.ts";
+import { SIZES } from "../src/engine/tune.ts";
 import * as G from "../src/engine/geom.ts";
 import { hash, Rng } from "../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../src/engine/space.ts";
@@ -185,4 +188,32 @@ add("flower slot", () => [F.slot(5, 0.08, 0.09), F.slot(6, 0, 0.1), F.slot(3, 0.
     add(`flower tilt ${deg}`, () => { const [fn, rh] = F.tilt(10, -20, 45, deg); return [probes.map(([x, y]) => fn(x, y)), rh]; },
       `(function() local fn, rh = F.tilt(10, -20, 45, ${deg}); local out = {}; for i, p in ipairs(${lit(probes)}) do out[i] = {fn(p[1], p[2])} end; return {out, rh} end)()`);
   }
+}
+
+// Size curves and sprays.
+for (const name of ["gyps", "leaf", "leaflet"]) {
+  const xs = Array.from({ length: 23 }, (_, i) => -0.05 + i * 0.05);
+  add(`dist spline ${name}`, () => { const f = D.spline(SIZES[name].points); return xs.map((x) => f(x)); },
+    `(function() local f = D.spline(TU.sizes[${lit(name)}].points); local out = {}; for i, x in ipairs(${lit(xs)}) do out[i] = f(x) end; return out end)()`);
+  add(`dist sample ${name}`, () => { const r = new Rng(name); return Array.from({ length: 40 }, () => D.sample(r, SIZES[name])); },
+    `(function() local r = R.new(${lit(name)}); local out = {}; for i = 1, 40 do out[i] = D.sample(r, TU.sizes[${lit(name)}]) end; return out end)()`);
+}
+for (const [len, dir] of [[30, 1], [90, -1], [160, 1]] as const) {
+  const p = point(50), a = num(0, 6);
+  add(`sprig tendril ${len}`, () => SP.tendril(p, a, len, dir), `SP.tendril(${lit(p)}, ${lit(a)}, ${len}, ${dir})`);
+  add(`sprig flourish ${len}`, () => SP.flourish(p, a, len, dir), `SP.flourish(${lit(p)}, ${lit(a)}, ${len}, ${dir})`);
+}
+// A batch as plain lists: hairlines by class, then florets, buds and stars.
+const batchOf = (b: SP.Batch) => [b.ribbons, b.lines, b.florets.map((f) => [f.x, f.y, f.r, f.rot ?? 0, f.tint ?? 2, f.soft === true]), b.buds.map((d) => [d.x, d.y, d.ang, d.len]), b.stars.map((s) => [s.x, s.y, s.r])];
+const BATCH_LUA = `local function plain(b) local fl = {}; for i, f in ipairs(b.florets) do fl[i] = {f[1], f[2], f[3], f[4] or 0, f[5] or 2, f[6] and true or false} end; return {b.ribbons, b.lines, fl, b.buds, b.stars} end`;
+for (const seed of ["spray 1", "spray 2"]) {
+  add(`sprig umbel ${seed}`, () => { const b = new SP.Batch(); SP.umbel(b, new Rng(seed), [10, 20], 1.4, 45); return batchOf(b); },
+    `(function() ${BATCH_LUA}; local b = SP.batch(); SP.umbel(b, R.new(${lit(seed)}), {10, 20}, 1.4, 45); return plain(b) end)()`);
+  add(`sprig cyme ${seed}`, () => { const b = new SP.Batch(); const axis = SP.cyme(b, new Rng(seed), [10, 20], 0.7, 55, -1); return [axis, batchOf(b)]; },
+    `(function() ${BATCH_LUA}; local b = SP.batch(); local axis = SP.cyme(b, R.new(${lit(seed)}), {10, 20}, 0.7, 55, -1); return {axis, plain(b)} end)()`);
+  add(`sprig gypsophila ${seed}`, () => { const b = new SP.Batch(); SP.gypsophila(b, new Rng(seed), [10, 20], 1.6, 32, 4); return batchOf(b); },
+    `(function() ${BATCH_LUA}; local b = SP.batch(); SP.gypsophila(b, R.new(${lit(seed)}), {10, 20}, 1.6, 32, 4); return plain(b) end)()`);
+  const stem = walk(30);
+  add(`sprig leaflets ${seed}`, () => SP.leafletItems(new Rng(seed), stem, [12, 20], 14),
+    `SP.leaflet_items(R.new(${lit(seed)}), ${lit(stem)}, {12, 20}, 14)`);
 }
