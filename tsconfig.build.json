@@ -1,0 +1,14 @@
+{
+  "//": "The published package: src compiled to dist/ as ES2022 JavaScript with types and maps (npm run build).",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rewriteRelativeImportExtensions": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

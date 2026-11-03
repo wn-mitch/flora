@@ -40,6 +40,13 @@ test: typecheck
     node tests/browser.mjs
     just test-lua
     just reference
+    just test-package
+
+# The npm package: built to dist/, packed, installed into a fresh project,
+# run from plain Node and typechecked as a consumer would.
+test-package:
+    npm run build
+    node tests/package.mjs
 
 # Times the engine in headless Chrome: grows LEAVES leaves with their
 # washes, converts the scene and draws it with WebGL2 (build/leaf-bench.png).
