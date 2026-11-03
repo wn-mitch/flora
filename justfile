@@ -40,3 +40,8 @@ test: typecheck
     node tests/browser.mjs
     just test-lua
     just reference
+
+# Times the engine in headless Chrome: grows LEAVES leaves with their
+# washes, converts the scene and draws it with WebGL2 (build/leaf-bench.png).
+leaf-bench LEAVES="50" RUNS="5" SCALE="2":
+    node tests/leaf-bench.mjs {{LEAVES}} {{RUNS}} {{SCALE}}
