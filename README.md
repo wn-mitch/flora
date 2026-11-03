@@ -1,10 +1,9 @@
 # web-flora
 
 web-flora generates watercolour plants and draws them on a canvas. You
-give it a page size and the box your text occupies; it grows a plant in
+give it a page size and the bounding box of the elements; it grows a plant in
 the margin beside the text, with stems, leaves, blooms and gilt
-ornaments, and keeps everything clear of the text. The same seed always
-grows the same plant.
+ornaments, keeping everything clear of the text. 
 
 Drawing uses WebGL2, with a 2D canvas renderer for browsers without it.
 Growing a plant needs no DOM, so it also runs in Node and in Web Workers.
