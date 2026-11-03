@@ -269,6 +269,64 @@ interface ReachPoint {
 // Stem points within reach of the holes, and per field cell the distance
 // to the nearest of them. `keys` lists the cells in reach in the order they
 // were first reached, so scans over them are deterministic.
+// A max-heap of cells by a key (a clearance), as two parallel arrays.
+class CellHeap {
+  private readonly key: number[] = [];
+  private readonly cell: number[] = [];
+
+  get size(): number {
+    return this.key.length;
+  }
+
+  topKey(): number {
+    return this.key[0];
+  }
+
+  push(v: number, k: number): void {
+    const key = this.key, cell = this.cell;
+    let i = key.length;
+    key.push(v);
+    cell.push(k);
+    while (i > 0) {
+      const up = Math.floor((i - 1) / 2);
+      if (key[up] >= v) break;
+      key[i] = key[up];
+      cell[i] = cell[up];
+      i = up;
+    }
+    key[i] = v;
+    cell[i] = k;
+  }
+
+  // Remove the top cell and return it.
+  pop(): number {
+    const key = this.key, cell = this.cell;
+    const top = cell[0];
+    const v = key[key.length - 1], k = cell[cell.length - 1];
+    key.pop();
+    cell.pop();
+    const n = key.length;
+    if (n === 0) return top;
+    let i = 0;
+    for (;;) {
+      const a = 2 * i + 1, b = a + 1;
+      let m = i, mv = v;
+      if (a < n && key[a] > mv) {
+        m = a;
+        mv = key[a];
+      }
+      if (b < n && key[b] > mv) m = b;
+      if (m === i) break;
+      key[i] = key[m];
+      cell[i] = cell[m];
+      i = m;
+    }
+    key[i] = v;
+    cell[i] = k;
+    return top;
+  }
+}
+
 class ReachMap {
   readonly pts: ReachPoint[] = [];
   readonly sd: number[] = [];
@@ -383,22 +441,46 @@ export function holes(g: Space, rng: Rng, ctx: GrowContext): Record<string, numb
     }
     return v;
   };
+  // Each round places at the reachable cell of greatest jittered
+  // clearance f * jitter (jitter under 1.15), the earliest reached on a
+  // tie. Clearance and reach only fall, so the cells are kept in a heap by
+  // the clearance they last had, an upper bound on what they have now: a
+  // round looks only at those whose bound could still win, refreshing
+  // stale ones, and picks just what scanning every cell would.
+  const heap = new CellHeap();
+  const pos: number[] = [];
+  let known = 0;
+  const looked: number[] = [];
   for (let iter = 1; iter <= 400; iter++) {
-    let best = -1, bi = -1;
-    const sdm = reach.sd;
-    for (const k of reach.keys) {
+    let best = -1, bi = -1, bpos = Infinity;
+    const sdm = reach.sd, keys = reach.keys;
+    for (; known < keys.length; known++) {
+      pos[keys[known]] = known;
+      heap.push(f[keys[known]], keys[known]);
+    }
+    looked.length = 0;
+    while (heap.size > 0 && heap.topKey() * 1.15 > best) {
+      const bound = heap.topKey(), k = heap.pop();
+      if (rejected[k]) continue;
       const fk = f[k];
-      if (fk * 1.15 > best && sdm[k] <= REACH && !rejected[k]) {
+      if (fk < bound) {
+        heap.push(fk, k);
+        continue;
+      }
+      looked.push(k);
+      if (sdm[k] <= REACH) {
         const v = fk * jitter(k, iter);
-        if (v > best) {
+        if (v > best || (v === best && pos[k] < bpos)) {
           const x = (mod(k, nx) + 0.5) * c, y = (Math.floor(k / nx) + 0.5) * c;
           if (fk >= floorAt(k, x, y)) {
             best = v;
             bi = k;
+            bpos = pos[k];
           }
         }
       }
     }
+    for (const k of looked) heap.push(f[k], k);
     if (bi < 0) break;
     const x = (mod(bi, nx) + 0.5) * c, y = (Math.floor(bi / nx) + 0.5) * c;
     const room = f[bi];
@@ -489,16 +571,36 @@ export function details(g: Space, rng: Rng, ctx: GrowContext): void {
   const rejected: boolean[] = [];
   for (let k = 0; k < nx * g.ny; k++) rejected.push(false);
   let made = 0;
+  // Each round takes the cell near a stem of greatest clearance, the
+  // earliest reached on a tie. Reach is fixed here and clearance only
+  // falls, so the cells near enough wait in a heap by the clearance they
+  // last had: a round refreshes stale tops until one is current, and
+  // looks on through any that could tie it.
+  const sdm = reach.sd, heap = new CellHeap(), pos: number[] = [];
+  reach.keys.forEach((k, i) => {
+    pos[k] = i;
+    if (sdm[k] < 22) heap.push(f[k], k);
+  });
+  const looked: number[] = [];
   for (let iter = 1; iter <= 300; iter++) {
     if (made >= cfg.sprays) break;
     let best = -1, bi = -1;
-    const sdm = reach.sd;
-    for (const k of reach.keys) {
-      if (f[k] > best && sdm[k] < 22 && !rejected[k]) {
-        best = f[k];
+    looked.length = 0;
+    while (heap.size > 0 && !(bi >= 0 && heap.topKey() < best)) {
+      const bound = heap.topKey(), k = heap.pop();
+      if (rejected[k]) continue;
+      const fk = f[k];
+      if (fk < bound) {
+        heap.push(fk, k);
+        continue;
+      }
+      looked.push(k);
+      if (fk > best || (fk === best && pos[k] < pos[bi])) {
+        best = fk;
         bi = k;
       }
     }
+    for (const k of looked) heap.push(f[k], k);
     if (bi < 0 || best < 3.5) break;
     const x = (mod(bi, nx) + 0.5) * c, y = (Math.floor(bi / nx) + 0.5) * c;
     rejected[bi] = true;
