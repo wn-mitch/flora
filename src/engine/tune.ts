@@ -171,3 +171,18 @@ export const WASH = {
   grain_mottle: 0.8,        // strength of the tonal mottling under the specks
   vein_opacity: 0.34,       // dark vein lines along each petal
 };
+
+// How often each ornament kind is picked for its place on the page,
+// against the other kinds for that place: 0 never. \florasetup{ornaments=
+// {...}} overrides these per document.
+export const ORNAMENTS: Readonly<Record<string, number>> = {
+  night: 3, sun: 1, moon: 1, constellation: 1, planet: 1, armillary: 1, scrolled: 1, strapwork: 1,
+  compass: 3, rosette: 1, sunburst: 1, quatrefoil: 1,
+  knot: 3, medallion: 1, zodiac_pendant: 1,
+  sun_crest: 2, compass_rose: 2, armillary_crest: 1, zodiac: 1, wreath: 1,
+  swash: 1, fleuron_rule: 1, headpiece: 1, copperplate: 2, swelled_rule: 2, fleuronnee: 1, rinceau: 2,
+  cul_de_lampe: 1, hedera: 1, garland: 1,
+  bracket: 1, fan: 1, corner_leaf: 1, acanthus_corner: 2, cornerpiece: 2, pen_corner: 1,
+  gilt_cross: 4, gilt_rosette: 3, gilt_dotted: 3, gilt_lozenge: 1,
+  gilt_star: 1.5, gilt_crescent: 1, gilt_trefoil: 1,
+};

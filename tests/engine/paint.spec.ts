@@ -1,6 +1,6 @@
 // The painter on every target: y turned over, circles as Bezier arcs, clips
 // nested and balanced, ink repainted for a dark backdrop.
-import { mod } from "#platform";
+import { fmt, mod } from "#platform";
 import { DARK_GROUND, lightness } from "../../src/engine/color.ts";
 import type { Cmd } from "../../src/engine/geom.ts";
 import { PAL, Painter, CUBIC, MOVE, CLOSE, type SceneItem } from "../../src/engine/paint.ts";
@@ -122,4 +122,65 @@ test("a projection moves every path and shading once, and clears", () => {
   eqList(shade.paint.to, [0, 60], "axis end");
   eqList(shade.path.coords, [-5, 90, -5, 50, 5, 50, 5, 90], "band");
   eqList(plain.path.coords, [1, 98], "a cleared projection leaves paths alone");
+});
+
+test("a group's opacity multiplies into what it holds, nested, and closes", () => {
+  const pt = new Painter({ width: 10, height: 10 });
+  pt.groupBegin(0.5);
+  pt.fill([["m", 0, 0]], PAL.blue, 0.8);
+  pt.groupBegin(0.5);
+  pt.stroke([["m", 0, 0]], PAL.blue, 1, 1);
+  pt.groupEnd();
+  pt.fill([["m", 0, 0]], PAL.blue, 1);
+  pt.groupEnd();
+  pt.fill([["m", 0, 0]], PAL.blue, 1);
+  const a = pt.scene().items.map((it) => (it.kind === "clip" ? -1 : it.alpha));
+  eqList(a, [0.4, 0.25, 0.5, 1], "alphas");
+  const open = new Painter({ width: 10, height: 10 });
+  open.groupBegin(0.5);
+  throws(() => open.scene(), "group", "an open group throws");
+  throws(() => new Painter({ width: 10, height: 10 }).groupEnd(), "groupEnd", "an unmatched groupEnd throws");
+});
+
+test("a frame maps after the projection, and inPage lifts both", () => {
+  const pt = new Painter({ width: 100, height: 100 });
+  pt.project((x, y) => [x + 1, y]);
+  pt.frame((x, y) => [2 * x, y]);
+  pt.fill([["m", 3, 0]], PAL.blue);
+  pt.inPage(() => pt.fill([["m", 3, 0]], PAL.blue));
+  pt.fill([["m", 3, 0]], PAL.blue);
+  const xs = pt.scene().items.map((it) => it.path.coords[0]);
+  eqList(xs, [8, 3, 8], "projected then framed; lifted; restored");
+});
+
+test("while gilding, full-strength gold and copper go to the gilder, and nothing else", () => {
+  const pt = new Painter({ width: 10, height: 10 });
+  const got: string[] = [];
+  pt.gild = {
+    fill: (_p, paths, tone) => { got.push("fill " + (tone ?? "lit") + " " + fmt(paths.length, 0)); },
+    line: (_p, _paths, w) => { got.push("line " + fmt(w, 1)); },
+  };
+  pt.fill([["m", 0, 0]], PAL.gold, 0.9);
+  pt.fillMany([[["m", 0, 0]], [["m", 1, 1]]], PAL.copper, 1);
+  pt.stroke([["m", 0, 0]], PAL.gold, 0.5, 1);
+  pt.fill([["m", 0, 0]], PAL.gold, 0.3);
+  pt.fill([["m", 0, 0]], PAL.gold, 1, { blend: "multiply" });
+  pt.stroke([["m", 0, 0]], PAL.copper, 0.5, 1);
+  pt.fill([["m", 0, 0]], PAL.blue, 1);
+  eq(got.join("; "), "fill lit 1; fill shade 2; line 0.5", "gold, copper and gold wire are gilt");
+  eq(pt.scene().items.length, 4, "a wash, blended gold, a copper line and blue stay flat");
+  pt.flatGilt = true;
+  pt.fill([["m", 0, 0]], PAL.gold, 0.9);
+  eq(got.length, 3, "flat gilt never calls the gilder");
+});
+
+test("metal keeps its colour and blend on a dark backdrop", () => {
+  const pt = new Painter({ width: 10, height: 10, backdrop: DARK_GROUND });
+  pt.asMetal(() => pt.fill([["m", 0, 0]], PAL.blue, 1, { blend: "multiply" }));
+  pt.fill([["m", 0, 0]], PAL.blue, 1, { blend: "multiply" });
+  const [metal, ink] = pt.scene().items;
+  if (metal.kind !== "fill" || ink.kind !== "fill" || metal.paint.kind !== "solid" || ink.paint.kind !== "solid") throw new Error("two fills");
+  eqList(metal.paint.rgb, PAL.blue, "metal keeps its colour");
+  eq(metal.blend, "multiply", "and its blend");
+  check(ink.paint.rgb[0] !== PAL.blue[0] && ink.blend === "screen", "ink turns over");
 });

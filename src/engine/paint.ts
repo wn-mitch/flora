@@ -77,7 +77,8 @@ export const PAL = {
 // Colours never repainted for a dark backdrop: metal, which reads on any
 // ground, and white, which paints highlights and glints and stays the
 // lightest thing on the page either way.
-const KEEP = [PAL.gold, PAL.copper, PAL.white];
+// orn_gild.ts adds the gilt's own pale and umber.
+export const KEEP: RGB[] = [PAL.gold, PAL.copper, PAL.white];
 
 // A map from the generator's coordinates to the page's (Painter.project).
 export type Projection = (this: void, x: number, y: number) => Pt;
@@ -86,6 +87,14 @@ export type Projection = (this: void, x: number, y: number) => Pt;
 // has reached (x, y).
 export interface Clock {
   born(x: number, y: number): boolean;
+}
+
+// What paints gilt while an ornament draws (ornaments.ts draw): gold and
+// copper fills at full strength, and gold strokes, go to it instead of
+// being painted flat.
+export interface Gilder {
+  fill(pt: Painter, paths: readonly (readonly Cmd[])[], tone: "shade" | undefined): void;
+  line(pt: Painter, paths: readonly (readonly Cmd[])[], width: number): void;
 }
 
 export interface PaintOptions {
@@ -141,6 +150,17 @@ export class Painter {
   private open: SceneClip[] = [];
   private inked: Record<string, RGB> = {};
   private projection: Projection | undefined;
+  private frameFn: Projection | undefined;
+  // Opacities of the open groups (groupBegin), multiplied into each item.
+  private groups: number[] = [];
+  private alpha = 1;
+  // Depth of gilding in progress, which keeps its colour on a dark
+  // backdrop.
+  metal = 0;
+  // While set, gold and copper are gilt (Gilder).
+  gild: Gilder | undefined;
+  // Paint gilt flat: gold and copper as given, never gilt.
+  flatGilt = false;
 
   constructor(o: PainterOptions) {
     this.width = o.width;
@@ -159,7 +179,7 @@ export class Painter {
   // lightness turned over (color.ts onGround), unless it is one of KEEP.
   ink(rgb: RGB): RGB {
     const bd = this.backdrop;
-    if (bd === undefined || KEEP.includes(rgb)) return rgb;
+    if (bd === undefined || this.metal > 0 || KEEP.includes(rgb)) return rgb;
     const key = fmt(rgb[0], 4) + "," + fmt(rgb[1], 4) + "," + fmt(rgb[2], 4);
     let c = this.inked[key];
     if (c === undefined) {
@@ -173,13 +193,72 @@ export class Painter {
   // multiply and screen trade places.
   blend(mode: Blend | undefined): Blend {
     if (mode === undefined) return "normal";
-    return this.backdrop === undefined ? mode : SWAP[mode] ?? mode;
+    return this.backdrop === undefined || this.metal > 0 ? mode : SWAP[mode] ?? mode;
   }
 
   // Set (or with undefined, clear) a projection every path and shading
   // passes through until it is cleared: a tilted bloom (flower.ts tilt).
   project(fn: Projection | undefined): void {
     this.projection = fn;
+  }
+
+  // Set (or with undefined, clear) the frame: a map from a layout frame's
+  // own coordinates to the page's (frames.ts). It applies after any
+  // projection, so elements that project themselves still land in the
+  // frame.
+  frame(fn: Projection | undefined): void {
+    this.frameFn = fn;
+  }
+
+  get currentFrame(): Projection | undefined {
+    return this.frameFn;
+  }
+
+  // The map every coordinate passes through, or undefined for none.
+  map(): Projection | undefined {
+    const pj = this.projection, fr = this.frameFn;
+    if (pj !== undefined && fr !== undefined) {
+      return (x, y) => {
+        const q = pj(x, y);
+        return fr(q[0], q[1]);
+      };
+    }
+    return pj ?? fr;
+  }
+
+  // Run fn in page coordinates, with the projection and frame lifted (gilt
+  // worked out after them), and restore them after.
+  inPage(fn: () => void): void {
+    const pj = this.projection, fr = this.frameFn;
+    this.projection = undefined;
+    this.frameFn = undefined;
+    fn();
+    this.projection = pj;
+    this.frameFn = fr;
+  }
+
+  // A transparency group: what is painted until groupEnd takes `opacity`
+  // too. Each item carries the product of the open groups' opacities, as
+  // the PDF backend paints a group, so overlaps inside it still stack.
+  groupBegin(opacity: number): void {
+    this.groups.push(opacity);
+    this.alpha *= opacity;
+  }
+
+  groupEnd(): void {
+    if (this.groups.length === 0) throw new Error("paint: groupEnd without groupBegin");
+    this.groups.pop();
+    let a = 1;
+    for (const g of this.groups) a *= g;
+    this.alpha = a;
+  }
+
+  // Run fn with metal > 0, so what it paints keeps its colour on a dark
+  // backdrop.
+  asMetal(fn: () => void): void {
+    this.metal++;
+    fn();
+    this.metal--;
   }
 
   // Fill one path.
@@ -190,9 +269,16 @@ export class Painter {
   // Fill several paths as one shape: where they overlap the paint is
   // applied once.
   fillMany(paths: readonly (readonly Cmd[])[], rgb: RGB, opacity = 1, o: PaintOptions = {}): void {
+    const g = this.gild;
+    if (g !== undefined && !this.flatGilt && (rgb === PAL.gold || rgb === PAL.copper) && opacity >= 0.5 && o.blend === undefined) {
+      this.gild = undefined;
+      g.fill(this, paths, rgb === PAL.copper ? "shade" : undefined);
+      this.gild = g;
+      return;
+    }
     this.add({
       kind: "fill", path: this.path(paths), paint: { kind: "solid", rgb: this.ink(rgb) },
-      rule: o.evenodd === true ? "evenodd" : "nonzero", alpha: Math.min(1, opacity), blend: this.blend(o.blend),
+      rule: o.evenodd === true ? "evenodd" : "nonzero", alpha: Math.min(1, opacity) * this.alpha, blend: this.blend(o.blend),
     });
   }
 
@@ -202,14 +288,21 @@ export class Painter {
   }
 
   strokeMany(paths: readonly (readonly Cmd[])[], rgb: RGB, width: number, opacity = 1, o: PaintOptions = {}): void {
-    this.add({ kind: "stroke", path: this.path(paths), rgb: this.ink(rgb), width, alpha: Math.min(1, opacity), blend: this.blend(o.blend) });
+    const g = this.gild;
+    if (g !== undefined && !this.flatGilt && rgb === PAL.gold && opacity >= 0.5 && o.blend === undefined) {
+      this.gild = undefined;
+      g.line(this, paths, width);
+      this.gild = g;
+      return;
+    }
+    this.add({ kind: "stroke", path: this.path(paths), rgb: this.ink(rgb), width, alpha: Math.min(1, opacity) * this.alpha, blend: this.blend(o.blend) });
   }
 
   // Paint gradient `stops` ([offset 0-1, rgb] pairs) so its start lies at p0
   // and its end at p1, covering `half` pt to either side of that axis and
   // half the axis' length beyond either end. Use inside a clip.
   shade(stops: readonly (readonly [number, RGB])[], p0: Pt, p1: Pt, half: number): void {
-    const pj = this.projection;
+    const pj = this.map();
     if (pj !== undefined) {
       p0 = pj(p0[0], p0[1]);
       p1 = pj(p1[0], p1[1]);
@@ -227,7 +320,7 @@ export class Painter {
     this.add({
       kind: "fill", path: this.path([band], false),
       paint: { kind: "linear", from: this.pt(p0), to: this.pt(p1), stops: stops.map((s): [number, RGB] => [s[0], this.ink(s[1])]) },
-      rule: "nonzero", alpha: 1, blend: "normal",
+      rule: "nonzero", alpha: this.alpha, blend: "normal",
     });
   }
 
@@ -246,6 +339,7 @@ export class Painter {
   // The scene painted so far. Every clip must be closed.
   scene(): Scene {
     if (this.open.length > 0) throw new Error("paint: a clip is still open");
+    if (this.groups.length > 0) throw new Error("paint: a group is still open");
     return { width: this.width, height: this.height, items: this.root };
   }
 
@@ -265,7 +359,7 @@ export class Painter {
   private path(paths: readonly (readonly Cmd[])[], project = true): ScenePath {
     const verbs: number[] = [], coords: number[] = [];
     const H = this.height;
-    const pj = project ? this.projection : undefined;
+    const pj = project ? this.map() : undefined;
     const put = (x: number, y: number): void => {
       if (pj === undefined) {
         coords.push(x, H - y);

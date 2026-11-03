@@ -5,15 +5,24 @@
 import * as C from "../src/engine/color.ts";
 import * as D from "../src/engine/dist.ts";
 import * as F from "../src/engine/flower.ts";
+import * as FLW from "../src/engine/flower.ts";
 import * as GR from "../src/engine/grow.ts";
 import * as LA from "../src/engine/layout.ts";
+import * as BR from "../src/engine/brush.ts";
+import * as LF from "../src/engine/leaf.ts";
+import * as O from "../src/engine/ornament.ts";
+import * as RL from "../src/engine/orn_relief.ts";
+import * as ORN from "../src/engine/ornaments.ts";
+import { PAL, Painter } from "../src/engine/paint.ts";
+import { PLANT } from "../src/engine/tune.ts";
+import { numbers } from "./engine/scenes.ts";
 import * as MX from "../src/engine/mix.ts";
 import * as SP from "../src/engine/sprig.ts";
 import { SIZES } from "../src/engine/tune.ts";
 import * as G from "../src/engine/geom.ts";
 import { hash, Rng } from "../src/engine/rng.ts";
 import { CORRIDOR, Space } from "../src/engine/space.ts";
-import type { Pt } from "../src/engine/geom.ts";
+import type { Cmd, Pt } from "../src/engine/geom.ts";
 
 export interface Case {
   readonly name: string;
@@ -311,4 +320,73 @@ for (const seed of ["spray 1", "spray 2"]) {
       return {counts, at(ctx.leaves), at(ctx.blooms), at(ctx.back), ctx.leaflets, plain(ctx.sprays), plain(ctx.stem_batch), widths, g:coverage()}
     end)()`);
   }
+}
+
+// Painted scenes, number by number: the Lua side paints onto a recording
+// painter (reference.ts MOCK) and ours onto the engine's, gilt flat.
+const H = 300;
+export const scene = (name: string, ts: (pt: Painter) => void, lua: string, tol = 1e-9) =>
+  add(name, () => { const pt = new Painter({ width: 300, height: H }); pt.flatGilt = true; ts(pt); return numbers(pt.scene().items); },
+    `(function() local pt = MOCK(${H}); ${lua}; return pt:numbers() end)()`, tol);
+scene("paint compass", (pt) => { O.compass(pt, 100, 120, 30); O.compass(pt, 40, 40, 7, { hair: 0.9, ring: 0 }); },
+  "O.compass(pt, 100, 120, 30); O.compass(pt, 40, 40, 7, { hair = 0.9, ring = 0 })");
+{
+  const kinds = ["plain", "dotted", "cross", "rosette", "lozenge", "star5", "crescent", "trefoil"];
+  const items = kinds.map((kind, i) => ({ x: 20 + i * 30, y: 50 + (i % 3) * 20, r: 2 + i * 0.6, kind }));
+  scene("paint sparkles", (pt) => O.sparkles(pt, items), `O.sparkles(pt, ${lit(items.map((s) => [s.x, s.y, s.r, s.kind]))})`);
+}
+for (const [seed, foot] of [["chain 1", false], ["chain 2", true]] as const) {
+  scene(`paint chain ${seed}`, (pt) => O.chain(pt, new Rng(seed), 18, 280, 20, foot ? "knot" : undefined),
+    `O.chain(pt, R.new(${lit(seed)}), 18, 280, 20, ${foot ? '"knot"' : "nil"})`);
+}
+scene("paint medallion", (pt) => O.medallion(pt, 150, 150, 30), "O.medallion(pt, 150, 150, 30)");
+for (const seed of ["p1", "p2", "p3", "p4"]) {
+  scene(`paint pendant ${seed}`, (pt) => { O.pendant(pt, new Rng(seed), 60, 60, 24, 34, seed === "p1" ? 0 : 14); },
+    `O.pendant(pt, R.new(${lit(seed)}), 60, 60, 24, 34, ${seed === "p1" ? 0 : 14})`);
+}
+// Every registered kind, through the registry.
+for (const k of ["cartouche", "header", "pendant", "gilt"].flatMap((slot) => ORN.of(slot))) {
+  const box = [100, 100, 160, 180] as const;
+  scene(`paint ornament ${k.name}`, (pt) => ORN.draw(k, pt, new Rng(k.name), box, { cord: 10 }),
+    `ORN.draw(${lit(k.name)}, pt, R.new(${lit(k.name)}), ${lit(box)}, { cord = 10 })`);
+}
+// The flora, painted.
+scene("paint leaf", (pt) => { const r = new Rng("leaf"); LF.leaf(pt, r, 120, 40, 1.3, LF.options(r, 110, 1.3)); },
+  "local r = R.new(\"leaf\"); LF.leaf(pt, r, 120, 40, 1.3, LF.options(r, 110, 1.3))");
+// Washed leaflets differ on purpose: the Lua strokes their midrib as a
+// list of paths without saying so, which paints nothing (tikz-flora
+// TASK-40); batched leaflets (a flower's sepals) agree.
+scene("paint leaflets", (pt) => LF.leaflets(pt, new Rng("lf"), [[50, 50, 0.4, 16], [80, 60, 1.2, 12]], PAL.deep, 0.9),
+  "LF.leaflets(pt, R.new(\"lf\"), {{50, 50, 0.4, 16}, {80, 60, 1.2, 12}}, PAINT.palette.deep, 0.9)");
+for (const style of ["fan", "round", "soft", "wedge"]) {
+  scene(`paint bloom ${style}`, (pt) => FLW.bloom(pt, new Rng(style), 150, 150, 40, { style }),
+    `FL.bloom(pt, R.new(${lit(style)}), 150, 150, 40, { style = ${lit(style)} })`);
+}
+scene("paint hero", (pt) => FLW.hero(pt, new Rng("hero"), 150, 150, 60), "FL.hero(pt, R.new(\"hero\"), {150, 150, 60})");
+scene("paint lily", (pt) => { FLW.tilted(pt, new Rng("lily"), 150, 150, 30, 2.1, 1.0, { kind: "lance", petals: 6, width: 0.36 }); },
+  "FL.tilted(pt, R.new(\"lily\"), 150, 150, 30, 2.1, 1.0, { kind = \"lance\", petals = 6, width = 0.36 })");
+scene("paint sprays", (pt) => {
+  const b = new SP.Batch();
+  SP.umbel(b, new Rng("u"), [80, 60], 1.5, 50);
+  SP.gypsophila(b, new Rng("g"), [150, 150], 1.7, 34, 4);
+  SP.cyme(b, new Rng("c"), [200, 60], 1.2, 60, 1);
+  b.paint(pt);
+}, "local b = SP.batch(); SP.umbel(b, R.new(\"u\"), {80, 60}, 1.5, 50); SP.gypsophila(b, R.new(\"g\"), {150, 150}, 1.7, 34, 4); SP.cyme(b, R.new(\"c\"), {200, 60}, 1.2, 60, 1); b:paint(pt)");
+{
+  const stem = walk(40).map(([x, y]) => [x + 150, y + 150] as Pt);
+  scene("paint stem", (pt) => BR.stem(pt, new Rng("st"), stem, (t) => 4 - 3 * t, PLANT),
+    `BR.stem(pt, R.new("st"), ${lit(stem)}, function(t) return 4 - 3 * t end, TU.plant)`);
+}
+
+// Gold in relief: filled shapes, a shaded tone, wire and a frame.
+{
+  const shapes: Cmd[][] = [G.polyline([[40, 40], [90, 50], [70, 100]], true), [["o", 150, 150, 12]], G.smooth(blob(9, 30).map(([x, y]) => [x + 200, y + 200] as Pt), true)];
+  const lua = lit(shapes);
+  scene("paint relief", (pt) => { RL.paint(pt, shapes, { shadow: 0.4 }); RL.paint(pt, shapes.slice(0, 1), { tone: "shade", key: 0 }); },
+    `local RL = require("flora.orn_relief"); RL.paint(pt, ${lua}, { shadow = 0.4 }); RL.paint(pt, { ${lit(shapes[0])} }, { tone = "shade", key = 0 })`);
+  const wires: Cmd[][] = [G.polyline([[20, 20], [60, 80], [120, 60]], false), [["o", 200, 60, 20]]];
+  scene("paint relief wire", (pt) => RL.paintPolys(pt, RL.ribbons(pt, wires, 0.6), { key: 0, tilt: 0.75 }),
+    `local RL = require("flora.orn_relief"); RL.paint_polys(pt, RL.ribbons(pt, ${lit(wires)}, 0.6), { key = 0, tilt = 0.75 })`);
+  scene("paint relief framed", (pt) => { pt.frame((x, y) => [300 - x, y]); RL.paint(pt, shapes.slice(0, 2)); pt.frame(undefined); },
+    `local RL = require("flora.orn_relief"); pt:frame(function(x, y) return 300 - x, y end); RL.paint(pt, { ${lit(shapes[0])}, ${lit(shapes[1])} }); pt:frame(nil)`);
 }

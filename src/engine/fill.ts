@@ -1,6 +1,8 @@
-// Spray helpers for grow.ts: a spray grown on a stalk from a stem point,
-// and a check that it clears the text.
+// Spray helpers for grow.ts (a spray grown on a stalk from a stem point,
+// and a check that it clears the text), and sparkles in leftover space.
 import * as G from "./geom.ts";
+import type { Sparkle } from "./ornament.ts";
+import { of, weight } from "./ornaments.ts";
 import type { Pt } from "./geom.ts";
 import type { Rng } from "./rng.ts";
 import * as S from "./sprig.ts";
@@ -71,4 +73,67 @@ export function fits(g: Space, b: S.Batch): boolean {
     if (ok && !(g.openAt(x, y) && g.openAt(x - r, y) && g.openAt(x + r, y) && g.openAt(x, y - r) && g.openAt(x, y + r))) ok = false;
   });
   return ok;
+}
+
+// The larger gilt's kinds by weight (orn_gilt.ts): the reference's own,
+// drawn from rng as they always were, and the newer ones, which replace a
+// pick from a stream of their own in proportion to their share of the
+// weight. With the newer kinds at 0, rng sees exactly the draws it did.
+function giltPicker(rng: Rng, weights?: Readonly<Record<string, number>>): (() => string | undefined) | undefined {
+  const old: Record<string, number> = {}, young: Record<string, number> = {};
+  let so = 0, sn = 0;
+  for (const k of of("gilt")) {
+    const w = weight(weights, k.name);
+    const sp = k.sparkle ?? "plain";
+    if (k.classic === true) {
+      old[sp] = w;
+      so += w;
+    } else {
+      young[sp] = w;
+      sn += w;
+    }
+  }
+  if (so + sn === 0) return undefined;
+  const alt = rng.fork("gilt kinds");
+  return () => {
+    let kind = so > 0 ? rng.weighted(old) : undefined;
+    if (sn > 0 && (kind === undefined || alt.chance(sn / (so + sn)))) kind = alt.weighted(young);
+    return kind;
+  };
+}
+
+const SMALL: Readonly<Record<string, number>> = { plain: 5, dotted: 3, lozenge: 2 };
+
+// Sparkles in whatever free space is left, reserving their room; `weights`
+// (ornaments settings) weigh the larger gilt.
+export function sparkles(rng: Rng, g: Space, n: number, weights?: Readonly<Record<string, number>>): Sparkle[] {
+  const cells = g.freeCells(2);
+  const pick = giltPicker(rng, weights);
+  const items: Sparkle[] = [];
+  const put = (x: number, y: number, size: number, kind: string | undefined) => {
+    const reach = (kind === "cross" ? 1.55 : 1) * size;
+    items.push({ x, y, r: size, kind });
+    g.reserve(x, y, reach * 2.2);
+  };
+  // First the larger gilt, as the reference's dotted crosses and rosettes:
+  // one in each of the wider gaps the foliage leaves, up to a third of n.
+  let big = 0, tries = 0;
+  while (pick !== undefined && big < n / 3 && tries < n * 30 && cells.length > 0) {
+    tries++;
+    const c = cells[rng.int(1, cells.length) - 1];
+    const r = g.clearance(c[0], c[1], 14);
+    if (r >= 9) {
+      put(c[0], c[1], rng.range(4.2, Math.min(7.5, r * 0.5)), pick());
+      big++;
+    }
+  }
+  // Then small sparkles in the narrower gaps.
+  tries = 0;
+  while (items.length < n && tries < n * 20 && cells.length > 0) {
+    tries++;
+    const c = cells[rng.int(1, cells.length) - 1];
+    const r = g.clearance(c[0], c[1], 8);
+    if (r >= 3) put(c[0], c[1], rng.range(1.4, Math.min(3.4, r * 0.8)), rng.weighted(SMALL));
+  }
+  return items;
 }
