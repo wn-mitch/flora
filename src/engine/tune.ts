@@ -186,3 +186,34 @@ export const ORNAMENTS: Readonly<Record<string, number>> = {
   gilt_cross: 4, gilt_rosette: 3, gilt_dotted: 3, gilt_lozenge: 1,
   gilt_star: 1.5, gilt_crescent: 1, gilt_trefoil: 1,
 };
+
+// How the painting is laid down as the plant grows (timeline.ts), in pt of
+// growth; the front moves a pt of stem per pt. Leaf timings are shares of
+// the leaf's length:
+//   ink_lag      how far a stem's ink line follows its wash
+//   stem_wet     a stem's wet front, shares of its width
+//   leaf_wash    the wash flooding a leaf from base to tip
+//   leaf_wet     the wet front behind it
+//   midrib       when the pen draws the midrib, and how long it takes
+//   veins        when the first lateral vein starts, and the spread over
+//                which the rest follow toward the tip
+//   vein         how long the pen takes over each vein
+//   hatch        when the hatching starts, and how long it takes
+//   outline      when the pen traces the contour, and how long it takes
+//   bloom_delay  growth after the front reaches a bloom before it opens
+//   visitor_delay  and a visitor before it arrives
+//   gilt_delay   and an ornament, sparkle or the compass before it is laid
+export const LAYING = {
+  ink_lag: 14,
+  stem_wet: 2.5,
+  leaf_wash: 1.1,
+  leaf_wet: 0.22,
+  midrib: [0.75, 0.45] as const,
+  veins: [0.95, 0.5] as const,
+  vein: 0.18,
+  hatch: [1.25, 0.5] as const,
+  outline: [1.1, 0.9] as const,
+  bloom_delay: 10,
+  visitor_delay: 120,
+  gilt_delay: 160,
+};

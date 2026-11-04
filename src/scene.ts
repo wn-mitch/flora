@@ -4,12 +4,12 @@
 // Float64Array, which holds every JavaScript number exactly, so nothing the
 // engine painted is moved. Malformed paths throw here rather than draw
 // wrong.
-import { CLOSE, CUBIC, LINE, MOVE, type DisplayList, type Item, type Paint, type Path } from "./display.ts";
-import type { Scene, SceneItem, ScenePaint, ScenePath } from "./engine/paint.ts";
+import { CLOSE, CUBIC, LINE, MOVE, type DisplayList, type Fill, type Item, type Paint, type Path, type Stroke } from "./display.ts";
+import type { Scene, SceneFill, SceneItem, ScenePaint, ScenePath, SceneStroke } from "./engine/paint.ts";
 
 const TAKES = [2, 2, 6, 0]; // coordinates each verb takes: MOVE, LINE, CUBIC, CLOSE
 
-function path(p: ScenePath): Path {
+export function path(p: ScenePath): Path {
   let need = 0;
   for (let i = 0; i < p.verbs.length; i++) {
     const v = p.verbs[i];
@@ -31,12 +31,27 @@ function paint(p: ScenePaint): Paint {
   };
 }
 
-function item(it: SceneItem): Item {
-  if (it.kind === "fill") return { kind: "fill", path: path(it.path), paint: paint(it.paint), rule: it.rule, alpha: it.alpha, blend: it.blend };
-  if (it.kind === "stroke") return { kind: "stroke", path: path(it.path), rgb: [it.rgb[0], it.rgb[1], it.rgb[2]], width: it.width, alpha: it.alpha, blend: it.blend };
-  return { kind: "clip", path: path(it.path), rule: it.rule, items: it.items.map(item) };
+export function fill(it: SceneFill): Fill {
+  return { kind: "fill", path: path(it.path), paint: paint(it.paint), rule: it.rule, alpha: it.alpha, blend: it.blend };
 }
 
+export function stroke(it: SceneStroke): Stroke {
+  return { kind: "stroke", path: path(it.path), rgb: [it.rgb[0], it.rgb[1], it.rgb[2]], width: it.width, alpha: it.alpha, blend: it.blend };
+}
+
+// Scene items as display items; a timed group's items stand in its place,
+// finished (src/timeline.ts draws a scene's frames).
+function items(list: readonly SceneItem[], out: Item[]): Item[] {
+  for (const it of list) {
+    if (it.kind === "fill") out.push(fill(it));
+    else if (it.kind === "stroke") out.push(stroke(it));
+    else if (it.kind === "clip") out.push({ kind: "clip", path: path(it.path), rule: it.rule, items: items(it.items, []) });
+    else items(it.final ?? it.items, out);
+  }
+  return out;
+}
+
+// The finished scene as a display list.
 export function toDisplayList(scene: Scene): DisplayList {
-  return { width: scene.width, height: scene.height, items: scene.items.map(item) };
+  return { width: scene.width, height: scene.height, items: items(scene.items, []) };
 }

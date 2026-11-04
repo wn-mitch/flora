@@ -10,7 +10,7 @@ import * as G from "./geom.ts";
 import type { Cmd, Pt } from "./geom.ts";
 import { PAL, type Painter } from "./paint.ts";
 import type { Rng } from "./rng.ts";
-import { COLOR, type PLANT, type WASH } from "./tune.ts";
+import { COLOR, LAYING, type PLANT, type WASH } from "./tune.ts";
 
 // Path commands for an outline as a plain polygon. Brush marks are a few
 // points wide with ten points a side, so straight segments read as smooth
@@ -129,23 +129,32 @@ export function stem(pt: Painter, rng: Rng, pts: readonly Pt[], wfn: (t: number)
   const ink = C.inkFor(rng, pt.palette.stems);
   const tone = (l: number, k: number) => (ink !== undefined ? C.inkRgb(ink, l) : C.oklch(l, k * C.maxChroma(l, h), h));
   const outline = G.smooth(G.ribbon(pts, (t) => wfn(t) / 2), true);
-  pt.fill(outline, tone(L, 0.85), 0.55 + 0.35 * (1 - cfg.stem_brush), { blend: "multiply" });
-  if (cfg.stem_brush <= 0) return;
-  // A point every 3 pt. Stems are often a whole number of steps long, and
-  // runtimes sum that length an ulp apart, so the count is taken a hair
-  // above the boundary to come out the same everywhere.
-  const line = G.resample(pts, Math.max(8, Math.floor(G.length(pts) / 3 + 1e-6)));
   let wmax = 0;
   for (let i = 0; i <= 10; i++) wmax = Math.max(wmax, wfn(i / 10));
-  pt.clipBegin(outline);
-  let pieces = broken(rng, offsetBy(line, wfn, -0.22), wmax * 0.32, 0.3, 0.2);
-  if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), tone(L * 0.7, 0.9), 0.65 * cfg.stem_brush, { blend: "multiply" });
-  pieces = broken(rng, offsetBy(line, wfn, 0.24), wmax * 0.16, 0.45, 0.3);
-  if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), PAL.white, 0.55 * cfg.stem_brush);
-  // Lost stretches: the lit edge dissolves into the paper.
-  pieces = broken(rng, offsetBy(line, wfn, 0.5), wmax * 0.3, 0.75, 0);
-  if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), PAL.white, 0.6 * cfg.stem_brush);
-  pt.clipEnd();
-  pieces = broken(rng, offsetBy(line, wfn, -0.5), Math.max(0.25, wmax * 0.09), 0.2, 0);
-  if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), PAL.ink, 0.7 * cfg.stem_brush, { blend: "multiply" });
+  // The wash runs along the stem from where it starts, as fast as the front
+  // grows; the ink line follows it.
+  const along = { at: pts[0], along: pts, half: wmax / 2 + 1.5 };
+  pt.lay([{ ...along, wet: wmax * LAYING.stem_wet }], () => {
+    pt.fill(outline, tone(L, 0.85), 0.55 + 0.35 * (1 - cfg.stem_brush), { blend: "multiply" });
+    if (cfg.stem_brush <= 0) return;
+    // A point every 3 pt. Stems are often a whole number of steps long, and
+    // runtimes sum that length an ulp apart, so the count is taken a hair
+    // above the boundary to come out the same everywhere.
+    const line = G.resample(pts, Math.max(8, Math.floor(G.length(pts) / 3 + 1e-6)));
+    pt.clipBegin(outline);
+    let pieces = broken(rng, offsetBy(line, wfn, -0.22), wmax * 0.32, 0.3, 0.2);
+    if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), tone(L * 0.7, 0.9), 0.65 * cfg.stem_brush, { blend: "multiply" });
+    pieces = broken(rng, offsetBy(line, wfn, 0.24), wmax * 0.16, 0.45, 0.3);
+    if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), PAL.white, 0.55 * cfg.stem_brush);
+    // Lost stretches: the lit edge dissolves into the paper.
+    pieces = broken(rng, offsetBy(line, wfn, 0.5), wmax * 0.3, 0.75, 0);
+    if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), PAL.white, 0.6 * cfg.stem_brush);
+    pt.clipEnd();
+  });
+  if (cfg.stem_brush <= 0) return;
+  const line = G.resample(pts, Math.max(8, Math.floor(G.length(pts) / 3 + 1e-6)));
+  pt.lay([{ ...along, start: LAYING.ink_lag }], () => {
+    const pieces = broken(rng, offsetBy(line, wfn, -0.5), Math.max(0.25, wmax * 0.09), 0.2, 0);
+    if (pieces.length > 0) pt.fillMany(pieces.map((p) => polygon(p)), PAL.ink, 0.7 * cfg.stem_brush, { blend: "multiply" });
+  });
 }

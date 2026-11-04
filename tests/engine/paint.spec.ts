@@ -134,7 +134,7 @@ test("a group's opacity multiplies into what it holds, nested, and closes", () =
   pt.fill([["m", 0, 0]], PAL.blue, 1);
   pt.groupEnd();
   pt.fill([["m", 0, 0]], PAL.blue, 1);
-  const a = pt.scene().items.map((it) => (it.kind === "clip" ? -1 : it.alpha));
+  const a = pt.scene().items.map((it) => (it.kind === "clip" || it.kind === "timed" ? -1 : it.alpha));
   eqList(a, [0.4, 0.25, 0.5, 1], "alphas");
   const open = new Painter({ width: 10, height: 10 });
   open.groupBegin(0.5);
@@ -149,7 +149,7 @@ test("a frame maps after the projection, and inPage lifts both", () => {
   pt.fill([["m", 3, 0]], PAL.blue);
   pt.inPage(() => pt.fill([["m", 3, 0]], PAL.blue));
   pt.fill([["m", 3, 0]], PAL.blue);
-  const xs = pt.scene().items.map((it) => it.path.coords[0]);
+  const xs = pt.scene().items.map((it) => (it.kind === "timed" ? NaN : it.path.coords[0]));
   eqList(xs, [8, 3, 8], "projected then framed; lifted; restored");
 });
 

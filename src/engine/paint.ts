@@ -9,7 +9,11 @@
 import { fmt } from "#platform";
 import { onGround, type RGB } from "./color.ts";
 import type { Cmd, Pt } from "./geom.ts";
+import * as L from "./lay.ts";
+import type { Lay } from "./lay.ts";
 import { MIX, PALETTE, type Palette } from "./tune.ts";
+
+export type { Lay } from "./lay.ts";
 
 export type Blend = "normal" | "multiply" | "screen";
 export type Rule = "nonzero" | "evenodd";
@@ -52,7 +56,29 @@ export interface SceneClip {
   readonly items: SceneItem[];
 }
 
-export type SceneItem = SceneFill | SceneStroke | SceneClip;
+// When and how the painting of `items` is laid down (timeline.ts). Sweeps
+// are in scene coordinates; b and d in pt of growth.
+export type Sweep =
+  | {
+    readonly kind: "line"; readonly b: number; readonly d: number; readonly pts: number[]; readonly arc: number[]; readonly half: number; readonly wet: number;
+    // When the pen reaches each point, never falling, b first and b + d
+    // last; without it the pen moves evenly.
+    readonly times?: number[];
+  }
+  | { readonly kind: "disc"; readonly b: number; readonly d: number; readonly x: number; readonly y: number; readonly r: number; readonly wet: number }
+  | { readonly kind: "gate"; readonly b: number; readonly d: number };
+
+// With `final`, the group's items are its parts as they are laid down,
+// and once all are, `final` is shown in their place: the same painting
+// done at once (Painter.batched).
+export interface SceneTimed {
+  readonly kind: "timed";
+  readonly sweeps: Sweep[];
+  readonly items: SceneItem[];
+  readonly final?: SceneItem[];
+}
+
+export type SceneItem = SceneFill | SceneStroke | SceneClip | SceneTimed;
 
 export interface Scene {
   readonly width: number;
@@ -83,11 +109,6 @@ export const KEEP: RGB[] = [PAL.gold, PAL.copper, PAL.white];
 // A map from the generator's coordinates to the page's (Painter.project).
 export type Projection = (this: void, x: number, y: number) => Pt;
 
-// A growth clock (the "watch it grow" frames): whether the growth front
-// has reached (x, y).
-export interface Clock {
-  born(x: number, y: number): boolean;
-}
 
 // What paints gilt while an ornament draws (ornaments.ts draw): gold and
 // copper fills at full strength, and gold strokes, go to it instead of
@@ -117,6 +138,8 @@ export interface PainterOptions {
   // own): what knocks out under a petal paints in it, so no paler halo
   // shows. On a dark backdrop it is unused; the backdrop is the paper.
   readonly paper?: RGB;
+  // Record the painting's timeline (Painter.timed).
+  readonly timed?: boolean;
 }
 
 // The Bezier arcs of a circle, starting and ending at (x + r, y): four
@@ -148,11 +171,17 @@ export class Painter {
   readonly paper: RGB | undefined;
   // Painted items, for diagnostics.
   count = 0;
-  // While set, batched line work paints only what the front has reached
-  // (sprig.ts Batch.paint).
-  clock: Clock | undefined;
+  // While true, what is painted inside lay() keeps its timing (timeline.ts)
+  // in timed groups; otherwise lay() only paints.
+  timed: boolean;
+  // When the growth front reaches a point, for lays given `at` (clock.ts
+  // GrowthClock.birth); without it they start at the enclosing start.
+  births: ((this: void, x: number, y: number) => number) | undefined;
+  // The start of the lay being painted, pt of growth.
+  private base = 0;
   private root: SceneItem[] = [];
-  private open: SceneClip[] = [];
+  // The clips and timed groups open, innermost last.
+  private open: (SceneClip | SceneTimed)[] = [];
   private inked: Record<string, RGB> = {};
   private projection: Projection | undefined;
   private frameFn: Projection | undefined;
@@ -174,6 +203,7 @@ export class Painter {
     this.palette = o.palette ?? PALETTE;
     this.mix = o.mix ?? MIX;
     this.paper = o.paper;
+    this.timed = o.timed === true;
   }
 
   // The weight of growth `kind` in this painter's mix (1 when unset).
@@ -332,16 +362,20 @@ export class Painter {
     });
   }
 
-  // Run fn and withdraw everything it painted: its randomness is spent as
-  // it would be, but nothing shows (clock.ts, an element not yet born).
-  // fn must close every clip and group it opens.
-  withdraw(fn: () => void): void {
+  // Run fn with the timeline recorded, then, given `after`, put
+  // after(what fn painted) in its place: a frame of it (timeline.ts frame),
+  // when fn is a whole plant painted for one frame of its growth. fn must
+  // close every clip, lay and group it opens.
+  recorded(fn: () => void, after?: (this: void, items: SceneItem[]) => SceneItem[]): void {
     const into = this.open.length > 0 ? this.open[this.open.length - 1].items : this.root;
-    const n0 = into.length, c0 = this.count, open0 = this.open.length, groups0 = this.groups.length;
+    const n0 = into.length, open0 = this.open.length, groups0 = this.groups.length, timed0 = this.timed;
+    this.timed = true;
     fn();
-    if (this.open.length !== open0 || this.groups.length !== groups0) throw new Error("paint: withdraw left a clip or group open");
-    while (into.length > n0) into.pop();
-    this.count = c0;
+    this.timed = timed0;
+    if (this.open.length !== open0 || this.groups.length !== groups0) throw new Error("paint: recorded left a clip, lay or group open");
+    if (after === undefined) return;
+    const mine = into.splice(n0, into.length - n0);
+    for (const it of after(mine)) into.push(it);
   }
 
   // Everything painted until clipEnd is clipped to `cmds`.
@@ -352,13 +386,66 @@ export class Painter {
   }
 
   clipEnd(): void {
-    if (this.open.length === 0) throw new Error("paint: clipEnd without clipBegin");
+    const top = this.open[this.open.length - 1];
+    if (top === undefined || top.kind !== "clip") throw new Error("paint: clipEnd without clipBegin");
     this.open.pop();
+  }
+
+  // Paint fn as laid down by `list` (one lay or several), each when and as Lay
+  // describes: what fn paints is a timed group (timeline.ts) while
+  // `timed`, and is painted as it is otherwise. Inside, the start of the
+  // earliest lay is the start later lays count from.
+  lay(list: readonly Lay[], fn: () => void): void {
+    if (!this.timed) {
+      fn();
+      return;
+    }
+    const { sweeps, later, first } = L.sweeps(list, { births: this.births, base: this.base, map: this.map(), height: this.height });
+    const group: SceneTimed = { kind: "timed", sweeps, items: [] };
+    this.add(group);
+    this.open.push(group);
+    const base0 = this.base, open0 = this.open.length;
+    this.base = first;
+    fn();
+    this.base = base0;
+    if (this.open.length !== open0 || this.open[open0 - 1] !== group) throw new Error("paint: lay left a clip open");
+    this.open.pop();
+    for (const sw of L.spreads(later, group.items, this.map(), this.height)) sweeps.push(sw);
+  }
+
+  // Paint `whole` laid down in parts: each part's paint as its lays
+  // describe, then, once every part is laid down, whole() in their place.
+  // A part must paint what whole() paints of it, so the parts together
+  // look as whole() does but for where they overlap. Without the timeline,
+  // only whole() is painted.
+  batched(parts: readonly { readonly lays: readonly Lay[]; readonly paint: (this: void) => void }[], whole: () => void): void {
+    if (!this.timed) {
+      whole();
+      return;
+    }
+    const group: SceneTimed = { kind: "timed", sweeps: [], items: [], final: [] };
+    this.add(group);
+    const open0 = this.open.length;
+    this.open.push(group);
+    for (const p of parts) this.lay(p.lays, p.paint);
+    this.open.pop();
+    const fin: SceneTimed = { kind: "timed", sweeps: [], items: [] };
+    this.open.push(fin);
+    whole();
+    if (this.open.length !== open0 + 1 || this.open[open0] !== fin) throw new Error("paint: batched left a clip open");
+    this.open.pop();
+    const final = group.final as SceneItem[];
+    for (const it of fin.items) final.push(it);
+  }
+
+  // The start of the lay being painted, pt of growth.
+  get start(): number {
+    return this.base;
   }
 
   // The scene painted so far. Every clip must be closed.
   scene(): Scene {
-    if (this.open.length > 0) throw new Error("paint: a clip is still open");
+    if (this.open.length > 0) throw new Error("paint: a clip or lay is still open");
     if (this.groups.length > 0) throw new Error("paint: a group is still open");
     return { width: this.width, height: this.height, items: this.root };
   }
@@ -366,7 +453,7 @@ export class Painter {
   private add(it: SceneItem): void {
     const into = this.open.length > 0 ? this.open[this.open.length - 1].items : this.root;
     into.push(it);
-    if (it.kind !== "clip") this.count++;
+    if (it.kind !== "clip" && it.kind !== "timed") this.count++;
   }
 
   private pt(p: Pt): Pt {

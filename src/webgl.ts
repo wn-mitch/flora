@@ -7,25 +7,78 @@
 // Canvas2D. A stroke's segment quads and join discs mark the stencil the
 // same way, so a stroke that crosses itself is painted once.
 //
+// Geometry is in device px before the view's offset, which the vertex
+// shader applies, so a path's triangles serve any window at one scale; a
+// renderer keeps them between draws (Store) for paths it sees again.
+//
 // The stencil's low six bits hold winding; the top two hold how many clips
 // a pixel is inside (up to three). Content at clip depth d is drawn where
 // the top bits equal d. Entering or leaving a clip flips the top bits that
 // differ between d and d + 1 (INVERT under a write mask), so no value ever
 // has to be written whole.
 
-import type { Blend, DisplayList, Image, Item, Paint, RGB, Rule } from "./display.ts";
+import type { Blend, DisplayList, Image, Item, Paint, Path, RGB, Rule } from "./display.ts";
 import { bounds, flatten, reaches, type View } from "./flatten.ts";
+import { strokeTriangles } from "./tess.ts";
 
 const LOW = 0x3f, SHIFT = 6, MAX_DEPTH = 3;
 // The top bits that change between depths d and d + 1.
 const step = (d: number) => ((d ^ (d + 1)) << SHIFT) & 0xc0;
 
-// What to draw, made once per list and view.
+// What to draw, made once per list and view. `buf` is where an op's
+// vertices are: 0 in the list's own, 1 in the renderer's store.
 type Op =
-  | { t: "fill"; start: number; count: number; cover: number; rule: Rule | "union"; paint: Paint; alpha: number; blend: Blend; depth: number }
-  | { t: "clip"; start: number; count: number; cover: number; rule: Rule; depth: number }
-  | { t: "unclip"; cover: number; depth: number }
-  | { t: "image"; quad: number; item: Image; depth: number; q0: [number, number]; qu: [number, number]; qv: [number, number] };
+  | { t: "fill"; buf: 0 | 1; start: number; count: number; cover: number; rule: Rule | "union"; paint: Paint; alpha: number; blend: Blend; depth: number }
+  | { t: "clip"; buf: 0 | 1; start: number; count: number; cover: number; rule: Rule; depth: number }
+  | { t: "unclip"; buf: 0 | 1; cover: number; depth: number }
+  | { t: "image"; buf: 0; quad: number; item: Image; depth: number; q0: [number, number]; qu: [number, number]; qv: [number, number] };
+
+// A path's triangles and cover quad, by vertex.
+interface Geo {
+  readonly start: number;
+  readonly count: number;
+  readonly cover: number;
+}
+
+// Floats kept in a store before it starts afresh: 48 MB.
+const STORE_LIMIT = 12 << 20;
+
+// Paths' geometry kept between draws at one scale, for paths drawn again:
+// a path is triangulated into the list's own vertices the first time it is
+// drawn, and into the store the second, where later draws reuse it. A list
+// drawn frame after frame (timeline.ts) thus prepares only what is new in
+// each frame. Keyed by path, and for a stroke by its width too.
+export class Store {
+  scale = NaN;
+  data = new Floats();
+  // Floats already sent to the GPU, and how many its buffer holds.
+  uploaded = 0;
+  capacity = 0;
+  // A Geo once stored, null for nothing to draw, 0 for seen once.
+  private kept = new WeakMap<Path, Map<number, Geo | null | 0>>();
+
+  // Start afresh at `scale`.
+  reset(scale: number): void {
+    this.scale = scale;
+    this.data = new Floats();
+    this.uploaded = 0;
+    this.capacity = 0;
+    this.kept = new WeakMap();
+  }
+
+  get(path: Path, key: number): Geo | null | 0 | undefined {
+    return this.kept.get(path)?.get(key);
+  }
+
+  set(path: Path, key: number, g: Geo | null | 0): void {
+    let m = this.kept.get(path);
+    if (m === undefined) {
+      m = new Map();
+      this.kept.set(path, m);
+    }
+    m.set(key, g);
+  }
+}
 
 // A Float32Array that grows as it is filled.
 class Floats {
@@ -52,97 +105,110 @@ class Floats {
   }
 }
 
+// A fill's (or clip's) triangles into `buf`: a fan per subpath, then the
+// cover quad over its box; null when there is nothing to draw.
+function fillGeo(buf: Floats, path: Path, v: View): Geo | null {
+  const subs = flatten(path, v);
+  const box = bounds(subs);
+  if (!box) return null;
+  const start = buf.vertices;
+  for (const p of subs) {
+    for (let k = 2; k + 3 < p.length; k += 2) buf.push6(p[0], p[1], p[k], p[k + 1], p[k + 2], p[k + 3]);
+  }
+  const count = buf.vertices - start;
+  return { start, count, cover: buf.quad(...box) };
+}
+
+// A stroke's quads and join discs into `buf`, then its cover quad.
+function strokeGeo(buf: Floats, path: Path, width: number, v: View): Geo | null {
+  const subs = flatten(path, v);
+  const hw = Math.max(width * v.scale, 1) / 2;
+  const box = bounds(subs, hw);
+  if (!box) return null;
+  const start = buf.vertices;
+  for (const p of subs) strokeTriangles(p, hw, buf);
+  const count = buf.vertices - start;
+  if (!count) return null;
+  return { start, count, cover: buf.quad(...box) };
+}
+
 // The ops and vertices for `list` under view `v`. Given a window `win`
 // (device px), items that cannot reach it are left out (flatten.ts
 // reaches), which draws the same picture for less work when the window
-// shows a part of the list.
-export function prepare(list: DisplayList, v: View, win?: { readonly w: number; readonly h: number }): { ops: Op[]; verts: Float32Array; triangles: number } {
+// shows a part of the list. Given a store at v's scale, geometry is kept
+// in it and reused (Store); `verts` then holds only what is not.
+export function prepare(list: DisplayList, v: View, win?: { readonly w: number; readonly h: number }, store?: Store): { ops: Op[]; verts: Float32Array; triangles: number } {
   const buf = new Floats();
   const ops: Op[] = [];
-  const fans = (subs: Float32Array[]) => {
-    const start = buf.vertices;
-    for (const p of subs) {
-      for (let k = 2; k + 3 < p.length; k += 2) buf.push6(p[0], p[1], p[k], p[k + 1], p[k + 2], p[k + 3]);
+  // Geometry is made before the view's offset; the shader applies it.
+  const at: View = { scale: v.scale, x0: 0, y0: 0 };
+  let triangles = 0;
+  // Path p's geometry, made by `make`, from the store when it has it.
+  const geo = (p: Path, key: number, make: (b: Floats) => Geo | null): [Geo, 0 | 1] | null => {
+    if (store === undefined) {
+      const g = make(buf);
+      return g === null ? null : [g, 0];
     }
-    return { start, count: buf.vertices - start };
+    const had = store.get(p, key);
+    if (had === null) return null;
+    if (had !== undefined && had !== 0) return [had, 1];
+    if (had === 0) {
+      const g = make(store.data);
+      store.set(p, key, g);
+      return g === null ? null : [g, 1];
+    }
+    store.set(p, key, 0);
+    const g = make(buf);
+    return g === null ? null : [g, 0];
   };
   const walk = (items: readonly Item[], depth: number) => {
     for (const it of items) {
       if (win !== undefined && !reaches(it, v, win.w, win.h)) continue;
       if (it.kind === "fill") {
-        const subs = flatten(it.path, v);
-        const box = bounds(subs);
-        if (!box) continue;
-        const { start, count } = fans(subs);
-        if (!count) continue;
-        ops.push({ t: "fill", start, count, cover: buf.quad(...box), rule: it.rule, paint: it.paint, alpha: it.alpha, blend: it.blend, depth });
+        const g = geo(it.path, -1, (b) => fillGeo(b, it.path, at));
+        if (g === null || !g[0].count) continue;
+        triangles += g[0].count / 3;
+        ops.push({ t: "fill", buf: g[1], start: g[0].start, count: g[0].count, cover: g[0].cover, rule: it.rule, paint: it.paint, alpha: it.alpha, blend: it.blend, depth });
       } else if (it.kind === "stroke") {
-        const subs = flatten(it.path, v);
-        const hw = Math.max(it.width * v.scale, 1) / 2;
-        const box = bounds(subs, hw);
-        if (!box) continue;
-        const start = buf.vertices;
-        for (const p of subs) strokeGeometry(buf, p, hw);
-        const count = buf.vertices - start;
-        if (!count) continue;
+        const g = geo(it.path, it.width, (b) => strokeGeo(b, it.path, it.width, at));
+        if (g === null) continue;
+        triangles += g[0].count / 3;
         const paint: Paint = { kind: "solid", rgb: it.rgb };
-        ops.push({ t: "fill", start, count, cover: buf.quad(...box), rule: "union", paint, alpha: it.alpha, blend: it.blend, depth });
+        ops.push({ t: "fill", buf: g[1], start: g[0].start, count: g[0].count, cover: g[0].cover, rule: "union", paint, alpha: it.alpha, blend: it.blend, depth });
       } else if (it.kind === "image") {
         const [a, b, c, d, e, f] = it.transform;
-        const P = (u: number, w: number): [number, number] => [((a * u + c * w + e) - v.x0) * v.scale, ((b * u + d * w + f) - v.y0) * v.scale];
+        const P = (u: number, w: number): [number, number] => [(a * u + c * w + e) * v.scale, (b * u + d * w + f) * v.scale];
         const [p00, p10, p11, p01] = [P(0, 0), P(1, 0), P(1, 1), P(0, 1)];
         const quad = buf.vertices;
         buf.push6(...p00, ...p10, ...p11);
         buf.push6(...p00, ...p11, ...p01);
         const qu: [number, number] = [p10[0] - p00[0], p10[1] - p00[1]];
         const qv: [number, number] = [p01[0] - p00[0], p01[1] - p00[1]];
-        ops.push({ t: "image", quad, item: it, depth, q0: p00, qu, qv });
+        triangles += 2;
+        ops.push({ t: "image", buf: 0, quad, item: it, depth, q0: p00, qu, qv });
       } else {
         if (depth >= MAX_DEPTH) throw new Error(`webgl: clips nest deeper than ${MAX_DEPTH}`);
-        const subs = flatten(it.path, v);
-        const box = bounds(subs);
-        if (!box) continue; // an empty clip shows nothing
-        const { start, count } = fans(subs);
-        const cover = buf.quad(...box);
-        ops.push({ t: "clip", start, count, cover, rule: it.rule, depth });
+        const g = geo(it.path, -1, (b) => fillGeo(b, it.path, at));
+        if (g === null) continue; // an empty clip shows nothing
+        const [{ start, count, cover }, where] = g;
+        triangles += count / 3;
+        ops.push({ t: "clip", buf: where, start, count, cover, rule: it.rule, depth });
         walk(it.items, depth + 1);
-        ops.push({ t: "unclip", cover, depth: depth + 1 });
+        ops.push({ t: "unclip", buf: where, cover, depth: depth + 1 });
       }
     }
   };
   walk(list.items, 0);
-  return { ops, verts: buf.data.subarray(0, buf.n), triangles: buf.vertices / 3 };
-}
-
-// Quads along polyline `p` and, for strokes over 1.5 px wide, a disc at
-// every vertex for round joins and caps.
-function strokeGeometry(buf: Floats, p: Float32Array, hw: number): void {
-  for (let k = 0; k + 3 < p.length; k += 2) {
-    const ax = p[k], ay = p[k + 1], bx = p[k + 2], by = p[k + 3];
-    const len = Math.hypot(bx - ax, by - ay);
-    if (len === 0) continue;
-    const nx = (-(by - ay) / len) * hw, ny = ((bx - ax) / len) * hw;
-    buf.push6(ax + nx, ay + ny, bx + nx, by + ny, bx - nx, by - ny);
-    buf.push6(ax + nx, ay + ny, bx - nx, by - ny, ax - nx, ay - ny);
-  }
-  if (hw < 0.75) return;
-  const n = Math.max(6, Math.min(24, Math.ceil(hw * 3)));
-  for (let k = 0; k < p.length; k += 2) {
-    const x = p[k], y = p[k + 1];
-    for (let j = 0; j < n; j++) {
-      const a0 = (j / n) * 2 * Math.PI, a1 = ((j + 1) / n) * 2 * Math.PI;
-      buf.push6(x, y, x + Math.cos(a0) * hw, y + Math.sin(a0) * hw, x + Math.cos(a1) * hw, y + Math.sin(a1) * hw);
-    }
-  }
+  return { ops, verts: buf.data.subarray(0, buf.n), triangles };
 }
 
 const VS = `#version 300 es
-in vec2 p; out vec2 uv; uniform vec2 size; uniform vec2 q0, qu, qv;
+in vec2 p; out vec2 uv; uniform vec2 size, off; uniform vec2 q0, qu, qv;
 void main() {
   // For images, uv is recovered from the quad's corners (q0 + u qu + v qv).
   mat2 m = mat2(qu, qv);
   uv = abs(determinant(m)) > 0.0 ? inverse(m) * (p - q0) : vec2(0);
-  vec2 c = p / size * 2.0 - 1.0;
+  vec2 c = (p - off) / size * 2.0 - 1.0;
   gl_Position = vec4(c.x, -c.y, 0, 1);
 }`;
 const FS = `#version 300 es
@@ -179,6 +245,9 @@ export class WebGLRenderer {
   readonly gl: WebGL2RenderingContext;
   private prog: WebGLProgram;
   private vbo: WebGLBuffer;
+  // Geometry kept between draws, and the buffer it is sent to.
+  private store = new Store();
+  private kept: WebGLBuffer;
   private u: Record<string, WebGLUniformLocation | null> = {};
   private textures = new WeakMap<Image, WebGLTexture>();
 
@@ -200,8 +269,9 @@ export class WebGLRenderer {
     gl.linkProgram(prog);
     if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error("webgl: " + gl.getProgramInfoLog(prog));
     this.prog = prog;
-    for (const n of ["size", "q0", "qu", "qv", "color", "mode", "height", "ga", "gb", "nstops", "st", "sc", "tex"]) this.u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ["size", "off", "q0", "qu", "qv", "color", "mode", "height", "ga", "gb", "nstops", "st", "sc", "tex"]) this.u[n] = gl.getUniformLocation(prog, n);
     this.vbo = gl.createBuffer()!;
+    this.kept = gl.createBuffer()!;
   }
 
   // Draw `list` over the whole canvas. Returns the time spent preparing
@@ -212,25 +282,50 @@ export class WebGLRenderer {
     this.view = view;
     const gl = this.gl, u = this.u;
     const W = gl.drawingBufferWidth, H = gl.drawingBufferHeight;
-    const { ops, verts, triangles } = prepare(list, view, { w: W, h: H });
+    const st = this.store;
+    if (st.scale !== view.scale || st.data.n > STORE_LIMIT) st.reset(view.scale);
+    const { ops, verts, triangles } = prepare(list, view, { w: W, h: H }, st);
     const t1 = performance.now();
     gl.useProgram(this.prog);
+    // What the store gained this draw goes to its buffer, which grows by
+    // doubling (sent whole when it does).
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.kept);
+    if (st.data.n > st.capacity) {
+      st.capacity = Math.max(st.data.n, st.capacity * 2, 1 << 16);
+      gl.bufferData(gl.ARRAY_BUFFER, st.capacity * 4, gl.DYNAMIC_DRAW);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, st.data.data, 0, st.data.n);
+      st.uploaded = st.data.n;
+    } else if (st.data.n > st.uploaded) {
+      gl.bufferSubData(gl.ARRAY_BUFFER, st.uploaded * 4, st.data.data, st.uploaded, st.data.n - st.uploaded);
+      st.uploaded = st.data.n;
+    }
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vbo);
     gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);
     const loc = gl.getAttribLocation(this.prog, "p");
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    let bound: 0 | 1 = 0;
     gl.uniform2f(u.size, W, H);
+    gl.uniform2f(u.off, view.x0 * view.scale, view.y0 * view.scale);
     gl.uniform1f(u.height, H);
     gl.viewport(0, 0, W, H);
     const bg = o.background;
     gl.clearColor(bg ? bg[0] : 0, bg ? bg[1] : 0, bg ? bg[2] : 0, bg ? 1 : 0);
     gl.clearStencil(0);
     gl.stencilMask(0xff);
+    // A draw ending in a clip leaves colour writes off, which clear obeys.
+    gl.colorMask(true, true, true, true);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
     gl.enable(gl.STENCIL_TEST);
     gl.enable(gl.BLEND);
-    for (const op of ops) this.run(op);
+    for (const op of ops) {
+      if (op.buf !== bound) {
+        bound = op.buf;
+        gl.bindBuffer(gl.ARRAY_BUFFER, bound === 1 ? this.kept : this.vbo);
+        gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+      }
+      this.run(op);
+    }
     const px = new Uint8Array(4);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px); // wait for the GPU
     return { prepare: t1 - t0, draw: performance.now() - t1, triangles };

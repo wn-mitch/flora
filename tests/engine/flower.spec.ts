@@ -67,7 +67,7 @@ test("the tilted hero shrinks its far petals and enlarges its near ones", () => 
   // The projection is cleared once the hero is done.
   pt.fill([["m", 1, 2]], [0, 0, 0]);
   const last = pt.scene().items[pt.scene().items.length - 1];
-  eq(last.path.coords[0], 1, "later paths are not projected");
+  eq(last.kind !== "timed" ? last.path.coords[0] : NaN, 1, "later paths are not projected");
 });
 
 test("a tilted bloom paints its calyx and returns where its stem meets it", () => {

@@ -7,7 +7,7 @@ import * as GR from "../../src/engine/grow.ts";
 import * as LA from "../../src/engine/layout.ts";
 import * as MX from "../../src/engine/mix.ts";
 import type { Space } from "../../src/engine/space.ts";
-import { Painter, type Scene, type SceneItem } from "../../src/engine/paint.ts";
+import { CLOSE, LINE, MOVE, Painter, type Scene, type SceneItem, type ScenePath } from "../../src/engine/paint.ts";
 import { Rng } from "../../src/engine/rng.ts";
 
 export function grow(seed: string, len = 110, ang = 1.3): Scene {
@@ -76,9 +76,15 @@ export function growPage(seed: string, mix?: MX.Mix): [Space, GR.GrowContext] {
   return [g, ctx];
 }
 
-// Every number a scene holds, in painting order.
+// Every number a scene holds, in painting order; a timed group's items
+// (its painting done at once, when it has one) count as painted in its
+// place.
 export function numbers(items: readonly SceneItem[], out: number[] = []): number[] {
   for (const it of items) {
+    if (it.kind === "timed") {
+      numbers(it.final ?? it.items, out);
+      continue;
+    }
     for (const v of it.path.verbs) out.push(v);
     for (const c of it.path.coords) out.push(c);
     if (it.kind === "clip") {
@@ -94,4 +100,42 @@ export function numbers(items: readonly SceneItem[], out: number[] = []): number
     }
   }
   return out;
+}
+
+// Whether path p, made only of straight sides, covers (x, y) under the
+// nonzero rule: its winding number there is not 0.
+export function covers(p: ScenePath, x: number, y: number): boolean {
+  let w = 0, sx = 0, sy = 0, px = 0, py = 0, open = false;
+  const edge = (ax: number, ay: number, bx: number, by: number) => {
+    const side = (bx - ax) * (y - ay) - (x - ax) * (by - ay);
+    if (ay <= y && by > y && side > 0) w++;
+    else if (ay > y && by <= y && side < 0) w--;
+  };
+  let k = 0;
+  for (const v of p.verbs) {
+    if (v === MOVE) {
+      if (open) edge(px, py, sx, sy);
+      sx = p.coords[k];
+      sy = p.coords[k + 1];
+      px = sx;
+      py = sy;
+      k += 2;
+      open = true;
+    } else if (v === LINE) {
+      const qx = p.coords[k], qy = p.coords[k + 1];
+      edge(px, py, qx, qy);
+      px = qx;
+      py = qy;
+      k += 2;
+    } else if (v === CLOSE) {
+      edge(px, py, sx, sy);
+      px = sx;
+      py = sy;
+      open = false;
+    } else {
+      throw new Error("covers: a curve");
+    }
+  }
+  if (open) edge(px, py, sx, sy);
+  return w !== 0;
 }

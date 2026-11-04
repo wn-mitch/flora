@@ -8,7 +8,7 @@ import * as G from "./geom.ts";
 import type { Cmd, Pt } from "./geom.ts";
 import { PAL, type Painter } from "./paint.ts";
 import type { Rng } from "./rng.ts";
-import { COMPOSE, PLANT, WASH } from "./tune.ts";
+import { COMPOSE, LAYING, PLANT, WASH } from "./tune.ts";
 import * as W from "./wash.ts";
 
 const PI = Math.PI;
@@ -148,15 +148,30 @@ function veins(pt: Painter, rng: Rng, spine: readonly Pt[], left: readonly Pt[],
   // Veins are broken and vary in contrast, so they sit in the wash rather
   // than reading as crisp lines drawn over it.
   const cfg = WASH;
-  const broken = (lines: readonly Pt[][], w: number, gap: number, lo: number, hi: number) => {
-    for (const line of lines) {
-      const pieces = Brush.broken(rng, line, w, gap, cfg.brush_dry * 0.5);
-      if (pieces.length > 0) pt.fillMany(pieces.map((p) => Brush.polygon(p)), PAL.white, rng.range(lo, hi));
+  // Each line is penned on its own, the k-th of n starting `at(k, n)` pt
+  // of growth into the leaf's painting.
+  const broken = (lines: readonly Pt[][], w: number, gap: number, lo: number, hi: number, at: (k: number, n: number) => number) => {
+    for (let k = 0; k < lines.length; k++) {
+      const line = lines[k];
+      pt.lay([{ start: at(k, lines.length), dur: LAYING.vein * size, along: line, half: w + 1 }], () => {
+        const pieces = Brush.broken(rng, line, w, gap, cfg.brush_dry * 0.5);
+        if (pieces.length > 0) pt.fillMany(pieces.map((p) => Brush.polygon(p)), PAL.white, rng.range(lo, hi));
+      });
     }
   };
-  broken([mid], size * 0.03, 0.08, 0.5, 0.75);
+  // Laterals pair off along the midrib, left and right together.
+  const vein = (k: number, n: number) => (LAYING.veins[0] + (LAYING.veins[1] * Math.floor(k / 2)) / Math.max(1, Math.ceil(n / 2))) * size;
+  const ribLay = [{ start: LAYING.midrib[0] * size, dur: LAYING.midrib[1] * size, along: mid, half: size * 0.03 + 1 }];
+  pt.lay(ribLay, () => {
+    for (const line of [mid]) {
+      const pieces = Brush.broken(rng, line, size * 0.03, 0.08, cfg.brush_dry * 0.5);
+      if (pieces.length > 0) pt.fillMany(pieces.map((p) => Brush.polygon(p)), PAL.white, rng.range(0.5, 0.75));
+    }
+  });
   const lineInk = C.recolor(PAL.ink, C.partInk("leaves", pt.palette));
-  W.hairlines(pt, [G.transform(mid, size * 0.012, -size * 0.004, 0)], lineInk, size * 0.006, 0.35, { blend: "multiply", head: 0.02 });
+  pt.lay(ribLay, () => {
+    W.hairlines(pt, [G.transform(mid, size * 0.012, -size * 0.004, 0)], lineInk, size * 0.006, 0.35, { blend: "multiply", head: 0.02 });
+  });
 
   const lats: Pt[][] = [], forks: Pt[][] = [];
   if (o.striate === true) {
@@ -174,7 +189,7 @@ function veins(pt: Painter, rng: Rng, spine: readonly Pt[], left: readonly Pt[],
         fine.push(G.splinePoints([p0, m, p1], 5));
       }
     }
-    broken(fine, size * 0.009, cfg.brush_gap, cfg.vein_contrast[0], cfg.vein_contrast[1]);
+    broken(fine, size * 0.009, cfg.brush_gap, cfg.vein_contrast[0], cfg.vein_contrast[1], vein);
   }
   const count = o.striate === true ? 0 : o.veins;
   for (let k = 1; k <= count; k++) {
@@ -192,8 +207,9 @@ function veins(pt: Painter, rng: Rng, spine: readonly Pt[], left: readonly Pt[],
       }
     }
   }
-  broken(lats, size * 0.02, cfg.brush_gap, cfg.vein_contrast[0], cfg.vein_contrast[1]);
-  if (forks.length > 0) broken(forks, size * 0.012, cfg.brush_gap, cfg.vein_contrast[0] * 0.7, cfg.vein_contrast[1] * 0.7);
+  broken(lats, size * 0.02, cfg.brush_gap, cfg.vein_contrast[0], cfg.vein_contrast[1], vein);
+  // A fork follows the vein it leaves.
+  if (forks.length > 0) broken(forks, size * 0.012, cfg.brush_gap, cfg.vein_contrast[0] * 0.7, cfg.vein_contrast[1] * 0.7, (k, n) => vein(k, n) + LAYING.vein * size);
 
   // Engraved hatching: short dark strokes running in from the margin,
   // slanted toward the base like the veins they shadow.
@@ -205,7 +221,20 @@ function veins(pt: Painter, rng: Rng, spine: readonly Pt[], left: readonly Pt[],
       hatch.push([m, G.mix(m, S(Math.max(1, i - back)), rng.range(0.18, 0.38))]);
     }
   }
-  W.hairlines(pt, hatch, lineInk, size * 0.007, 0.32, { blend: "multiply", head: 0.01 });
+  pt.lay([{ start: LAYING.hatch[0] * size, dur: LAYING.hatch[1] * size, along: spine, half: reachFrom(spine, left.concat(right)) + 2 }], () => {
+    W.hairlines(pt, hatch, lineInk, size * 0.007, 0.32, { blend: "multiply", head: 0.01 });
+  });
+}
+
+// How far any of `pts` lies from polyline `line`'s nearest vertex.
+export function reachFrom(line: readonly Pt[], pts: readonly Pt[]): number {
+  let far = 0;
+  for (const p of pts) {
+    let near = Infinity;
+    for (const q of line) near = Math.min(near, G.dist(p, q));
+    far = Math.max(far, near);
+  }
+  return far;
 }
 
 // Options for a large leaf of length up to `len` heading `ang`, drawn from
@@ -321,9 +350,14 @@ export function leaf(pt: Painter, rng: Rng, x: number, y: number, ang: number, o
   const lit = spine.slice();
   for (let i = right.length - 1; i >= 0; i--) lit.push(right[i]);
 
-  halo(pt, poly, spine[0], size);
+  // The wash floods the blade from its base to its tip, the halo and the
+  // joint with it.
+  const half = reachFrom(spine, poly) + 4;
+  const body = [{ along: spine, half, dur: LAYING.leaf_wash * size, wet: LAYING.leaf_wet * size }];
+  pt.lay(body, () => halo(pt, poly, spine[0], size));
   W.wash(pt, poly, {
     rng, size,
+    sweep: { along: spine, half, body: LAYING.leaf_wash * size, wet: LAYING.leaf_wet * size, line: [LAYING.outline[0] * size, LAYING.outline[1] * size] },
     ramp: o.look === "soft" ? "soft" : "leaf", axis: [spine[0], spine[spine.length - 1]],
     light: G.at(spine, 0.25)[0],
     pigment: look.pigment, pool: look.pool, strength: look.strength,
@@ -347,7 +381,8 @@ export function leaf(pt: Painter, rng: Rng, x: number, y: number, ang: number, o
       veins(p, rng, spine, left, right, size, o);
     },
   });
-  if (o.attach !== undefined) attach(pt, poly, spine, size, o.attach);
+  const at = o.attach;
+  if (at !== undefined) pt.lay(body, () => attach(pt, poly, spine, size, at));
   return spine;
 }
 
@@ -434,15 +469,18 @@ export function leaflets(pt: Painter, rng: Rng, items: readonly Leaflet[], rgb?:
     const rib = G.transform([[0, len * 0.12], [bend * len * 0.25, len * 0.7]], x, y, rot);
     if (rgb === undefined) {
       const tip = G.transform([[bend * len, len]], x, y, rot)[0];
-      W.wash(pt, poly, {
+      const axis: Pt[] = [[x, y], G.mix([x, y], tip, 0.5), tip];
+      // Each leaflet is painted once the front reaches its base.
+      pt.lay([{ at: [x, y] }], () => W.wash(pt, poly, {
         rng, size: len,
+        sweep: { along: axis, half: reachFrom(axis, poly) + 2, body: LAYING.leaf_wash * len, wet: LAYING.leaf_wet * len, line: [LAYING.outline[0] * len, LAYING.outline[1] * len] },
         ramp: "leaf", part: "leaflets", axis: [[x, y], tip], light: G.mix([x, y], tip, 0.3),
         pigment: PAL.blue, pool: PAL.deep, strength: 1.1,
         rings: 4, lift: 0.02, bleed: len * 0.03,
         dark_streaks: 0, streaks: 0, fade_scale: 0.5, simple: true, grain: 0.5, grain_scale: 0.5,
         outline: 0.75, outline_w: Math.max(0.2, len * 0.012),
         inner: (p) => p.stroke(G.polyline(rib, false), PAL.white, Math.max(0.18, len * 0.03), 0.55),
-      });
+      }));
     } else {
       bodies.push(G.smooth(poly, true));
       ribs.push(G.polyline(rib, false));

@@ -298,6 +298,20 @@ export interface WashOptions {
   // continuous gradient instead of lightening layers.
   readonly ramp?: string;
   readonly axis?: readonly [Pt, Pt];
+  // How the wash is laid down (Painter.lay): the body flooded along a line
+  // and, after it, the outline traced round the contour.
+  readonly sweep?: WashSweep;
+}
+
+// A wash's lays: the body swept along `along` by a band `half` either side
+// over `body` pt of growth, with a wet front `wet` wide; the outline traced
+// from `line[0]` after the wash starts, over `line[1]`.
+export interface WashSweep {
+  readonly along: readonly Pt[];
+  readonly half: number;
+  readonly body: number;
+  readonly wet: number;
+  readonly line: readonly [number, number];
 }
 
 // Paint `poly` as a watercolour glaze; see the module comment for the layers.
@@ -328,118 +342,143 @@ export function wash(pt: Painter, poly: readonly Pt[], o: WashOptions): void {
   const erng = new Rng(rng.int(1, 2 ** 30));
   const runs = edgeRuns(erng, poly, paleAt, o.lost ?? cfg.lost_edges);
 
-  // Knock out what lies beneath so a front petal covers the one behind it
-  // instead of glazing over it.
-  const knockout = o.knockout ?? 0.9;
-  if (knockout > 0) pt.fill(body, PAL.paper, knockout);
-  const bleed = o.bleed ?? size * 0.022;
-  for (let i = 0; i < 2; i++) pt.fill(G.smooth(G.deform(poly, rng, bleed), true), pig, 0.10 * s, { blend: "multiply" });
-  if (o.ramp !== undefined) {
-    if (axis === undefined) throw new Error("wash: a ramp needs an axis");
-    // A continuous base-to-tip gradient: the full range from paper white to
-    // deep ultramarine within one shape.
-    pt.clipBegin(body);
-    const info = rampFill(pt, rng, o.ramp, axis[0], axis[1], size * 1.5, o.part);
-    // An ink group picks one ink per shape; the rim pools in that ink.
-    if (info.ink !== undefined) {
-      pool = C.recolor(o.pool ?? PAL.deep, info.ink);
-      line = C.recolor(PAL.ink, info.ink);
-      grainRgb = C.recolor(PAL.deep, info.ink);
+  const sw = o.sweep;
+  const bodyLays = sw === undefined ? [] : [{ along: sw.along, half: sw.half, dur: sw.body, wet: sw.wet }];
+  const lineLays = sw === undefined ? [] : [{ start: sw.line[0], dur: sw.line[1], along: ringFrom(poly, sw.along[0]), half: (o.outline_w ?? 0.28) + 1 }];
+  const layBody = (fn: () => void) => (sw === undefined ? fn() : pt.lay(bodyLays, fn));
+  const layLine = (fn: () => void) => (sw === undefined ? fn() : pt.lay(lineLays, fn));
+  layBody(() => {
+    // Knock out what lies beneath so a front petal covers the one behind it
+    // instead of glazing over it.
+    const knockout = o.knockout ?? 0.9;
+    if (knockout > 0) pt.fill(body, PAL.paper, knockout);
+    const bleed = o.bleed ?? size * 0.022;
+    for (let i = 0; i < 2; i++) pt.fill(G.smooth(G.deform(poly, rng, bleed), true), pig, 0.10 * s, { blend: "multiply" });
+    if (o.ramp !== undefined) {
+      if (axis === undefined) throw new Error("wash: a ramp needs an axis");
+      // A continuous base-to-tip gradient: the full range from paper white to
+      // deep ultramarine within one shape.
+      pt.clipBegin(body);
+      const info = rampFill(pt, rng, o.ramp, axis[0], axis[1], size * 1.5, o.part);
+      // An ink group picks one ink per shape; the rim pools in that ink.
+      if (info.ink !== undefined) {
+        pool = C.recolor(o.pool ?? PAL.deep, info.ink);
+        line = C.recolor(PAL.ink, info.ink);
+        grainRgb = C.recolor(PAL.deep, info.ink);
+      }
+      // Broken brushwork along the growth direction, then the glazes over it.
+      const k = G.clamp(size / 30, 0.3, 1.3);
+      const nd = Math.floor(rng.range(cfg.brush_bands[0], cfg.brush_bands[1]) * k + 0.5);
+      const np = Math.floor(rng.range(cfg.brush_pale[0], cfg.brush_pale[1]) * k * (o.pale_scale ?? 1) + 0.5);
+      const lines = o.brush_lines;
+      const dark = lines !== undefined ? lines(rng, nd) : fan(rng, poly, light, nd, 0.6, 1.0);
+      const pale = lines !== undefined ? lines(rng, np) : fan(rng, poly, light, np, 0.5, 0.98);
+      if (o.simple !== true) {
+        Brush.paint(pt, rng, dark, pale, size, info, cfg);
+        variegate(pt, rng, poly, size, info, o.lifts ?? 1);
+      }
+    } else {
+      pt.fill(body, pig, Math.min(0.95, 0.85 * s), { blend: "multiply" });
+      pt.clipBegin(body);
+      // Many faint layers read as a gradient; few strong ones read as rings.
+      const rings = o.rings ?? 12;
+      for (let k = 1; k <= rings; k++) {
+        const sc = 1 - (k / (rings + 1)) ** 0.75 * 0.97;
+        const layer = G.deform(G.toward(poly, light[0], light[1], sc), rng, size * 0.018 * sc);
+        pt.fill(G.smooth(layer, true), PAL.white, o.lift ?? 0.10);
+      }
     }
-    // Broken brushwork along the growth direction, then the glazes over it.
-    const k = G.clamp(size / 30, 0.3, 1.3);
-    const nd = Math.floor(rng.range(cfg.brush_bands[0], cfg.brush_bands[1]) * k + 0.5);
-    const np = Math.floor(rng.range(cfg.brush_pale[0], cfg.brush_pale[1]) * k * (o.pale_scale ?? 1) + 0.5);
-    const lines = o.brush_lines;
-    const dark = lines !== undefined ? lines(rng, nd) : fan(rng, poly, light, nd, 0.6, 1.0);
-    const pale = lines !== undefined ? lines(rng, np) : fan(rng, poly, light, np, 0.5, 0.98);
-    if (o.simple !== true) {
-      Brush.paint(pt, rng, dark, pale, size, info, cfg);
-      variegate(pt, rng, poly, size, info, o.lifts ?? 1);
+
+    // The wet edge: pigment pools at the rim, heaviest toward the tip.
+    const ramped = o.ramp !== undefined;
+    if (runs !== undefined) {
+      pt.fillMany(bands(runs[0], size * 0.08, 0.2), pool, (ramped ? 0.12 : 0.16) * s, { blend: "multiply" });
+      pt.fillMany(bands(runs[0], size * 0.025, 0.2), pool, (ramped ? 0.26 : 0.30) * s, { blend: "multiply" });
+    } else {
+      pt.stroke(body, pool, size * 0.16, (ramped ? 0.12 : 0.16) * s, { blend: "multiply" });
+      pt.stroke(body, pool, size * 0.05, (ramped ? 0.26 : 0.30) * s, { blend: "multiply" });
     }
-  } else {
-    pt.fill(body, pig, Math.min(0.95, 0.85 * s), { blend: "multiply" });
-    pt.clipBegin(body);
-    // Many faint layers read as a gradient; few strong ones read as rings.
-    const rings = o.rings ?? 12;
-    for (let k = 1; k <= rings; k++) {
-      const sc = 1 - (k / (rings + 1)) ** 0.75 * 0.97;
-      const layer = G.deform(G.toward(poly, light[0], light[1], sc), rng, size * 0.018 * sc);
-      pt.fill(G.smooth(layer, true), PAL.white, o.lift ?? 0.10);
+
+    const streaks = Math.floor((o.streaks ?? 0) * (ramped ? cfg.streak_scale : 1));
+    if (streaks > 0) {
+      const lines = fan(rng, poly, light, streaks);
+      const half = Math.floor(lines.length / 2);
+      hairlines(pt, lines.slice(0, half), PAL.white, size * 0.022, 0.75);
+      hairlines(pt, lines.slice(half), PAL.white, size * 0.013, 0.55);
     }
-  }
-
-  // The wet edge: pigment pools at the rim, heaviest toward the tip.
-  const ramped = o.ramp !== undefined;
-  if (runs !== undefined) {
-    pt.fillMany(bands(runs[0], size * 0.08, 0.2), pool, (ramped ? 0.12 : 0.16) * s, { blend: "multiply" });
-    pt.fillMany(bands(runs[0], size * 0.025, 0.2), pool, (ramped ? 0.26 : 0.30) * s, { blend: "multiply" });
-  } else {
-    pt.stroke(body, pool, size * 0.16, (ramped ? 0.12 : 0.16) * s, { blend: "multiply" });
-    pt.stroke(body, pool, size * 0.05, (ramped ? 0.26 : 0.30) * s, { blend: "multiply" });
-  }
-
-  const streaks = Math.floor((o.streaks ?? 0) * (ramped ? cfg.streak_scale : 1));
-  if (streaks > 0) {
-    const lines = fan(rng, poly, light, streaks);
-    const half = Math.floor(lines.length / 2);
-    hairlines(pt, lines.slice(0, half), PAL.white, size * 0.022, 0.75);
-    hairlines(pt, lines.slice(half), PAL.white, size * 0.013, 0.55);
-  }
-  // Rays: fine white lines fanning from the light point (a flower's eye)
-  // partway along the shape, each third with its own contrast.
-  const rays = o.rays;
-  if (rays !== undefined && rays.count > 0) {
-    const lines = fan(rng, poly, light, rays.count, rays.reach[0], rays.reach[1]);
-    const lo = rays.contrast[0], hi = rays.contrast[1];
-    const thirds = Math.max(1, Math.floor(lines.length / 3));
-    for (let k = 0; k <= 2; k++) {
-      const part3 = lines.slice(k * thirds, k === 2 ? lines.length : (k + 1) * thirds);
-      hairlines(pt, part3, PAL.white, size * (0.007 + 0.004 * k), lo + ((hi - lo) * k) / 2);
+    // Rays: fine white lines fanning from the light point (a flower's eye)
+    // partway along the shape, each third with its own contrast.
+    const rays = o.rays;
+    if (rays !== undefined && rays.count > 0) {
+      const lines = fan(rng, poly, light, rays.count, rays.reach[0], rays.reach[1]);
+      const lo = rays.contrast[0], hi = rays.contrast[1];
+      const thirds = Math.max(1, Math.floor(lines.length / 3));
+      for (let k = 0; k <= 2; k++) {
+        const part3 = lines.slice(k * thirds, k === 2 ? lines.length : (k + 1) * thirds);
+        hairlines(pt, part3, PAL.white, size * (0.007 + 0.004 * k), lo + ((hi - lo) * k) / 2);
+      }
     }
-  }
-  if ((o.dark_streaks ?? 0) > 0) {
-    const lines = fan(rng, poly, light, o.dark_streaks ?? 0, 0.4, 0.98);
-    hairlines(pt, lines, pool, size * 0.010, cfg.vein_opacity * s, { blend: "multiply" });
-  }
-
-  if (o.inner !== undefined) o.inner(pt);
-
-  if ((o.grain ?? 0) > 0) {
-    grain(pt, rng, poly, o.grain ?? 0, {
-      scale: o.grain_scale ?? 1, dark_op: 0.30 * s + 0.08,
-      clump: cfg.grain_clump, mottle: cfg.grain_mottle, dark_rgb: grainRgb,
-    });
-  }
-
-  // Lost edges: the wash fades into the paper through faint, uneven layers
-  // that reach in from the contour, so the white of the page runs into the
-  // shape without a boundary of its own.
-  if (runs !== undefined && cfg.lost_fade > 0) {
-    // Depth follows the shape's thickness (2 area / perimeter, about the
-    // width of a thin blade), not its length, so a long leaf keeps its body.
-    const ring = poly.slice();
-    ring.push(poly[0]);
-    const thick = (2 * Math.abs(G.area(poly))) / Math.max(1e-9, G.length(ring));
-    const d = Math.min(size, 1.6 * thick) * cfg.lost_fade * (o.fade_scale ?? 1);
-    // With eye_fade (0-1) the fade narrows away from the pale end, so a
-    // petal pales toward its eye and keeps its blue up the sides and tip.
-    const ef = o.eye_fade ?? 0;
-    const scaleAt = ef > 0 ? (p: Pt) => 1 - ef + ef * G.smoothstep(0.35, 0.9, paleAt(p)) : undefined;
-    const layers = o.simple === true ? 3 : 7;
-    for (let k = 1; k <= layers; k++) {
-      const w = d * (0.36 - (0.045 * (k - 1) * 7) / layers);
-      pt.fillMany(bands(runs[1], w, 0.4 - 0.03 * k, erng, w * 0.25, scaleAt), PAL.white, 0.22);
+    if ((o.dark_streaks ?? 0) > 0) {
+      const lines = fan(rng, poly, light, o.dark_streaks ?? 0, 0.4, 0.98);
+      hairlines(pt, lines, pool, size * 0.010, cfg.vein_opacity * s, { blend: "multiply" });
     }
-  }
 
-  pt.clipEnd();
+    if (o.inner !== undefined) o.inner(pt);
+
+    if ((o.grain ?? 0) > 0) {
+      grain(pt, rng, poly, o.grain ?? 0, {
+        scale: o.grain_scale ?? 1, dark_op: 0.30 * s + 0.08,
+        clump: cfg.grain_clump, mottle: cfg.grain_mottle, dark_rgb: grainRgb,
+      });
+    }
+
+    // Lost edges: the wash fades into the paper through faint, uneven layers
+    // that reach in from the contour, so the white of the page runs into the
+    // shape without a boundary of its own.
+    if (runs !== undefined && cfg.lost_fade > 0) {
+      // Depth follows the shape's thickness (2 area / perimeter, about the
+      // width of a thin blade), not its length, so a long leaf keeps its body.
+      const ring = poly.slice();
+      ring.push(poly[0]);
+      const thick = (2 * Math.abs(G.area(poly))) / Math.max(1e-9, G.length(ring));
+      const d = Math.min(size, 1.6 * thick) * cfg.lost_fade * (o.fade_scale ?? 1);
+      // With eye_fade (0-1) the fade narrows away from the pale end, so a
+      // petal pales toward its eye and keeps its blue up the sides and tip.
+      const ef = o.eye_fade ?? 0;
+      const scaleAt = ef > 0 ? (p: Pt) => 1 - ef + ef * G.smoothstep(0.35, 0.9, paleAt(p)) : undefined;
+      const layers = o.simple === true ? 3 : 7;
+      for (let k = 1; k <= layers; k++) {
+        const w = d * (0.36 - (0.045 * (k - 1) * 7) / layers);
+        pt.fillMany(bands(runs[1], w, 0.4 - 0.03 * k, erng, w * 0.25, scaleAt), PAL.white, 0.22);
+      }
+    }
+
+    pt.clipEnd();
+  });
 
   if ((o.outline ?? 0) > 0) {
-    if (runs !== undefined) {
-      pt.fillMany(bands(runs[0], (o.outline_w ?? 0.28) / 2, 0.25), line, o.outline ?? 0, { blend: "multiply" });
-    } else {
-      pt.stroke(body, line, o.outline_w ?? 0.28, o.outline ?? 0, { blend: "multiply" });
+    layLine(() => {
+      if (runs !== undefined) {
+        pt.fillMany(bands(runs[0], (o.outline_w ?? 0.28) / 2, 0.25), line, o.outline ?? 0, { blend: "multiply" });
+      } else {
+        pt.stroke(body, line, o.outline_w ?? 0.28, o.outline ?? 0, { blend: "multiply" });
+      }
+    });
+  }
+}
+
+// Closed outline `poly` as a polyline that starts and ends at its point
+// nearest `p`, the way a pen traces a contour from the base round.
+export function ringFrom(poly: readonly Pt[], p: Pt): Pt[] {
+  let i0 = 0, best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const d = G.dist(poly[i], p);
+    if (d < best) {
+      best = d;
+      i0 = i;
     }
   }
+  const out: Pt[] = [];
+  for (let j = 0; j <= poly.length; j++) out.push(poly[mod(i0 + j, poly.length)]);
+  return out;
 }

@@ -26,7 +26,6 @@ const PAGES: [string, FloraSpec][] = [
   ["body short", { ...BODY, seed: 5, lines: lines(12, 712, 12, 162, 436, 8) }],
   ["body mix", { ...BODY, seed: 9, mix: { lily: 3, umbel: 0, density: 0.7, bee: 2, butterfly: 2, snail: 1, bird: 1 }, ornaments: { compass: 0 } }],
   ["body palette", { ...BODY, seed: 4, palette: { blooms: "random", leaves: "random" }, spin: 2 }],
-  ["body grow", { ...BODY, seed: 3, grow: 0.5 }],
   // A plant hung down a long web margin, with its growth budgeted.
   ["margin budget", {
     width: 146, height: 3000, seed: 7, budget: 3,

@@ -1,14 +1,16 @@
 // Size curves draw in proportion to their density, and the sprays collect
-// their line work into batches that paint, or under a growth clock paint
-// only what the front has reached.
+// their line work into batches that paint, laid down piece by piece when
+// the painter keeps the timeline.
 import { fmt } from "#platform";
 import * as D from "../../src/engine/dist.ts";
 import * as G from "../../src/engine/geom.ts";
-import { Painter, type Clock } from "../../src/engine/paint.ts";
+import { Painter } from "../../src/engine/paint.ts";
 import { Rng } from "../../src/engine/rng.ts";
 import * as S from "../../src/engine/sprig.ts";
+import * as TL from "../../src/engine/timeline.ts";
 import { SIZES } from "../../src/engine/tune.ts";
-import { check, eq, near, test } from "./harness.ts";
+import { check, eq, eqList, near, test } from "./harness.ts";
+import { covers, numbers } from "./scenes.ts";
 
 test("a size curve draws in proportion to its density", () => {
   // A density rising linearly from 0 to 1 has its mean two thirds along.
@@ -74,30 +76,46 @@ test("sprays fill a batch, which paints in a few fills", () => {
   check(far < 120, "every point near where it was grown");
 });
 
-test("under a growth clock a batch paints only what is born", () => {
+test("a timed batch lays each line, floret and bud down from its own start", () => {
   const b = new S.Batch();
   b.line([[10, 10], [20, 20]], 1);
   b.line([[90, 90], [95, 95]], 1);
   b.floret(10, 12, 2, 0, 2);
   b.floret(90, 92, 2, 0, 2);
   b.bud(90, 90, 0, 5);
-  const pt = new Painter({ width: 100, height: 100 });
-  // Typed as a Clock, so the Lua builds pass it the clock as self.
-  const clock: Clock = { born: (x: number) => x < 50 };
-  pt.clock = clock;
+  // Born as far along as x: the near line and floret early, the rest late.
+  const pt = new Painter({ width: 100, height: 100, timed: true });
+  pt.births = (x: number) => x;
   b.paint(pt);
-  check(pt.clock === clock, "the clock is restored");
   const items = pt.scene().items;
-  const line = items[0];
-  if (line.kind !== "stroke") throw new Error("the hairline first");
-  eq(line.path.verbs[0], 0, "a move");
-  eq(line.path.coords[0], 10, "only the near line");
-  check(line.path.verbs.filter((v) => v === 0).length === 1, "one line");
-  // The line, then the near floret's petals, rims, eye and speck; no bud.
-  eq(items.length, 5, "only the near line and floret");
+  eq(items.length, 1, "one timed group");
+  const group = items[0];
+  if (group.kind !== "timed" || group.final === undefined) throw new Error("a timed group painted in parts");
+  // A part for what starts at 10, another for what starts at 90.
+  eq(group.items.length, 2, "two parts");
+  const sweeps = group.items.flatMap((p) => (p.kind === "timed" ? p.sweeps : []));
+  eq(sweeps.map((s) => s.kind).join(" "), "line disc line disc disc", "a sweep per line, floret and bud, part by part");
+  eqList(sweeps.map((s) => s.b), [10, 10, 90, 90, 90], "each starts when the front reaches it");
   const all = new Painter({ width: 100, height: 100 });
   b.paint(all);
-  eq(all.scene().items.length, 6, "without the clock, the bud too");
+  eqList(numbers(group.final), numbers(all.scene().items), "once laid down, the batch painted whole");
+  eqList(numbers(items), numbers(all.scene().items), "timing changes nothing finished");
+  // At growth 40 the near line and floret are done, the rest not begun:
+  // one clip over what is shown.
+  // At growth 40 the near part is done and shows whole; the far part
+  // has not begun.
+  const shown = TL.frame(items, 40);
+  const near = TL.frame(group.items.slice(0, 1), 1000);
+  eqList(numbers(shown), numbers(near), "only the near part, whole");
+  // Partway through the far part, one clip over what is shown.
+  const mid = TL.frame(items, 92);
+  const clip = mid[mid.length - 1];
+  if (clip.kind !== "clip") throw new Error("a clip");
+  // Scene coordinates run down from the top.
+  check(covers(clip.path, 90, 10), "the far line's start is shown");
+  check(!covers(clip.path, 95, 5), "its end is not yet");
+  eqList(numbers(TL.frame(items, 1000)), numbers(all.scene().items), "the last frame is the finished batch");
+  eq(TL.frame(items, 5).length, 0, "nothing before the first start");
 });
 
 test("leaflets alternate along a stem and stay on it", () => {

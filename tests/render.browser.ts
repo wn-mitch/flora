@@ -4,6 +4,10 @@
 import { PathBuilder, type Blend, type DisplayList, type Item, type Paint, type RGB, type Rule } from "../src/display.ts";
 import { WebGLRenderer } from "../src/webgl.ts";
 import { drawCanvas2D } from "../src/canvas2d.ts";
+import { compose, leaf, Painter, Rng } from "../src/engine/index.ts";
+import { toDisplayList } from "../src/scene.ts";
+import { Timeline } from "../src/timeline.ts";
+import { meshCases } from "./mesh.browser.ts";
 
 type Px = [number, number, number, number];
 const results: { name: string; ok: boolean; msg: string }[] = [];
@@ -265,5 +269,101 @@ check("WebGL draws a real garden's volume many times faster than Canvas2D", () =
   log.push(`volume: ${commands} path commands; webgl ${glms.toFixed(0)} ms (prepare ${r.timing.prepare.toFixed(0)}, draw ${r.timing.draw.toFixed(0)}, ${r.timing.triangles} triangles), canvas2d ${r.c2ms.toFixed(0)} ms`);
   if (glms * 4 > r.c2ms) throw new Error(`webgl ${glms.toFixed(0)} ms is not 4x faster than canvas2d ${r.c2ms.toFixed(0)} ms`);
 });
+
+// `list` drawn by a renderer with no history, under `o`, as RGBA.
+function fresh(list: DisplayList, w: number, h: number, o: { scale: number; x0?: number; y0?: number }): Uint8ClampedArray {
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  new WebGLRenderer(c).draw(list, o);
+  return pixels(c, w, h);
+}
+function pixels(src: CanvasImageSource, w: number, h: number): Uint8ClampedArray {
+  const c = new OffscreenCanvas(w, h), x = c.getContext("2d")!;
+  x.drawImage(src, 0, 0);
+  return x.getImageData(0, 0, w, h).data;
+}
+function same(a: Uint8ClampedArray, b: Uint8ClampedArray, what: string) {
+  let off = 0;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) off++;
+  if (off > 0) throw new Error(`${what}: ${off} channels differ`);
+}
+
+check("geometry kept between draws draws what a fresh renderer does, at any offset and scale", () => {
+  const items: Item[] = [];
+  const p = new PathBuilder();
+  blot(p, () => 0.4, 60, 60, 40, 9);
+  items.push(fill(p, [0.2, 0.3, 0.8], { alpha: 0.7, blend: "multiply" }));
+  items.push({ kind: "stroke", path: new PathBuilder().moveTo(10, 150).cubicTo(60, 90, 120, 210, 190, 140).build(), rgb: [0.1, 0.1, 0.3], width: 2.5, alpha: 0.9, blend: "normal" });
+  items.push({ kind: "clip", path: circle(new PathBuilder(), 120, 90, 50).build(), rule: "nonzero", items: [fill(rect(70, 40, 200, 200), [0.9, 0.4, 0.2], { alpha: 0.6 })] });
+  const list: DisplayList = { width: 200, height: 200, items };
+  const c = document.createElement("canvas");
+  const r = new WebGLRenderer(c);
+  // Whole, three times: from scratch, into the store, from the store.
+  c.width = 400; c.height = 400;
+  const want = fresh(list, 400, 400, { scale: 2 });
+  for (let k = 0; k < 3; k++) {
+    r.draw(list, { scale: 2 });
+    same(pixels(c, 400, 400), want, `draw ${k + 1}`);
+  }
+  // A window lower down, from the same store.
+  c.width = 400; c.height = 160;
+  r.draw(list, { scale: 2, y0: 70 });
+  same(pixels(c, 400, 160), fresh(list, 400, 160, { scale: 2, y0: 70 }), "a window at an offset");
+  // Another scale starts the store afresh.
+  c.width = 300; c.height = 300;
+  for (let k = 0; k < 2; k++) {
+    r.draw(list, { scale: 1.5 });
+    same(pixels(c, 300, 300), fresh(list, 300, 300, { scale: 1.5 }), `scale 1.5, draw ${k + 1}`);
+  }
+});
+
+check("a timeline's frames drawn one after another match each drawn fresh", () => {
+  const pt = new Painter({ width: 240, height: 320, timed: true });
+  const rng = new Rng("frames");
+  leaf.leaf(pt, rng, 120, 40, 1.3, leaf.options(rng, 110, 1.3));
+  const tl = new Timeline(pt.scene());
+  const c = document.createElement("canvas");
+  c.width = 480; c.height = 640;
+  const r = new WebGLRenderer(c);
+  let shown = 0;
+  for (let i = 0; i <= 12; i++) {
+    const list = tl.at((tl.end * i) / 12);
+    shown += list.items.length;
+    r.draw(list, { scale: 2 });
+    same(pixels(c, 480, 640), fresh(list, 480, 640, { scale: 2 }), `frame ${i}`);
+  }
+  if (shown === 0) throw new Error("the frames show nothing");
+  same(pixels(c, 480, 640), fresh(toDisplayList(pt.scene()), 480, 640, { scale: 2 }), "the last frame is the finished leaf");
+});
+
+check("a window of a page's frames looks alike between its stretches of change", () => {
+  const lines = Array.from({ length: 39 }, (_, i) => ({ x0: 162, x1: 436, y0: 712 - 12 * i, y1: 720 - 12 * i }));
+  const spec = { width: 595, height: 842, seed: 6, text: { x0: 162, y0: 120, x1: 436, y1: 720 }, header_y: 760, lines };
+  const pt = new Painter({ width: 595, height: 842, timed: true });
+  compose.page(spec, { painter: pt });
+  const tl = new Timeline(pt.scene());
+  // A window of the margin, drawn at 2 px a unit from its top left.
+  const win = [0, 300, 160, 500] as const, w = 320, h = 400;
+  const c = document.createElement("canvas");
+  c.width = w; c.height = h;
+  const r = new WebGLRenderer(c);
+  const shot = (u: number) => {
+    r.draw(tl.at(u, win), { scale: 2, x0: win[0], y0: win[1] });
+    return pixels(c, w, h);
+  };
+  const ch = tl.changes(win);
+  let gaps = 0;
+  for (let i = 0; i + 1 < ch.length; i++) {
+    const a = ch[i][1], b = ch[i + 1][0];
+    if (b - a < 1) continue;
+    gaps++;
+    same(shot(a + (b - a) * 0.25), shot(a + (b - a) * 0.75), `between stretches ${i} and ${i + 1}`);
+  }
+  const last = ch[ch.length - 1][1];
+  same(shot(last), shot(tl.end), "finished by the last stretch");
+  log.push(`changes: ${ch.length} stretches, ${gaps} gaps checked, the window finished at ${last.toFixed(0)} of ${tl.end.toFixed(0)}`);
+});
+
+meshCases(check, log);
 
 (window as unknown as { done: unknown }).done = { results, log };

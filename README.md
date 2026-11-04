@@ -88,6 +88,48 @@ compose.page(spec, { progress: (f) => { bar.value = f; } });
 To keep your page responsive, grow and draw in a Web Worker:
 `WebGLRenderer` and `drawCanvas2D` both accept an `OffscreenCanvas`.
 
+## Watching it grow
+
+A painter made with `timed: true` records when each stroke is laid
+down. The growth front starts at the plant's root. Stems are inked as
+the front passes, each leaf is washed from its base to its tip and then
+its veins are penned, and blooms open. A `Timeline` turns the recording
+into frames:
+
+```js
+import { Timeline, WebGLRenderer } from "@alpaca-software/web-flora";
+
+const pt = new Painter({ width: 595, height: 842, timed: true });
+compose.page(spec, { painter: pt });
+const tl = new Timeline(pt.scene());
+const gl = new WebGLRenderer(canvas);
+
+// t from 0 to 1; the frame at tl.end is the finished page.
+gl.draw(tl.at(t * tl.end), { scale: devicePixelRatio });
+```
+
+The renderer keeps each frame's geometry for the next, so drawing frame
+after frame costs much less than drawing the page once. To draw part of
+a page, pass that window, `[x0, y0, x1, y1]`, as `tl.at(u, win)`;
+`tl.changes(win)` lists the stretches of growth during which that window
+changes. `spec.grow` (0 to 1) paints one such frame directly.
+
+For animation, build the timeline's mesh once and draw its frames with
+`MeshRenderer`. The mesh goes to the GPU on the first draw; after that a
+frame costs a few draw calls, usually a millisecond or two for a page.
+Frames are drawn over an opaque background, the page's paper:
+
+```js
+import { meshOf, MeshRenderer } from "@alpaca-software/web-flora";
+
+const mesh = meshOf(tl, devicePixelRatio);        // or meshOf(tl, scale, win)
+const mr = new MeshRenderer(canvas);
+mr.draw(mesh, t * tl.end, { background: [0.98, 0.97, 0.95] });
+```
+
+The edge of what is laid down can sit a pixel or two from where `tl.at`
+draws it. The finished frame matches it up to antialiasing.
+
 ## Inks
 
 Every part of a plant (blooms, leaves, stems and so on) has its own ink.

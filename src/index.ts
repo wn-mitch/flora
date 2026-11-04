@@ -4,3 +4,6 @@ export { WebGLRenderer, prepare, type DrawOptions } from "./webgl.ts";
 export { drawCanvas2D, toPath2D } from "./canvas2d.ts";
 export { fromPdfScene, OPERATORS, type PdfScene } from "./pdf-scene.ts";
 export { toDisplayList } from "./scene.ts";
+export { Timeline } from "./timeline.ts";
+export { meshOf, type Mesh } from "./mesh.ts";
+export { MeshRenderer, type MeshDrawOptions } from "./meshgl.ts";

@@ -21,25 +21,27 @@ import * as O from "./ornament.ts";
 import type { Sparkle } from "./ornament.ts";
 import * as Title from "./orn_title.ts";
 import { draw as drawOrnament, pick } from "./ornaments.ts";
-import { PAL, Painter } from "./paint.ts";
+import { PAL, Painter, type Lay } from "./paint.ts";
 import * as P from "./plant.ts";
 import type { Stem } from "./plant.ts";
 import { BATCH, BLOOM, GROWN, Progress, TITLE_SHARE } from "./progress.ts";
 import { Rng } from "./rng.ts";
 import type { Space } from "./space.ts";
 import * as S from "./sprig.ts";
-import { COMPOSE, HERO, PALETTE, PLANT } from "./tune.ts";
+import { COMPOSE, HERO, LAYING, PALETTE, PLANT } from "./tune.ts";
+import * as TL from "./timeline.ts";
 import * as Visitor from "./visitor.ts";
 
 const PI = Math.PI;
 // The hero's projected top stays this far inside the paper's edge, pt.
 const HERO_TOP = 8;
 
-// Something to paint, and where, for the growth clock; ornaments have no
-// place of their own and paint once the front has passed everything.
+// Something to paint, and where, for the growth clock; `lays`, when given,
+// say how it is laid down (Painter.lay) in place of opening out from `at`.
 interface Piece {
   readonly paint: (this: void, pt: Painter) => void;
   readonly at?: Pt;
+  readonly lays?: readonly Lay[];
 }
 
 // What planting a frame leaves besides its paint: how much of the region
@@ -135,7 +137,7 @@ export function plant(spec: FloraSpec, pt: Painter, prog: Progress = Progress.of
       if (fits) {
         g.box(cx - w / 2, py - h / 2, cx + w / 2, py + h / 2);
         const r = rng.fork("panel");
-        orn.push({ paint: (p) => drawOrnament(cartouche, p, r, [cx - w / 2, py - h / 2, cx + w / 2, py + h / 2]) });
+        orn.push({ paint: (p) => drawOrnament(cartouche, p, r, [cx - w / 2, py - h / 2, cx + w / 2, py + h / 2]), at: [cx, py] });
         panel = [cx, py, w, h];
         break;
       }
@@ -188,11 +190,17 @@ export function plant(spec: FloraSpec, pt: Painter, prog: Progress = Progress.of
   if (headerY !== undefined) {
     const hx = spec.text.x0 - 6, hy = headerY - 3;
     const mark = pick(rng.fork("choose header"), "header", spec.ornaments);
+    // The rule is ruled from the mark across the text at an even pace.
+    const rule: Pt[] = [[hx + 4, hy], [spec.text.x1, hy]];
     orn.push({
       paint: (p) => {
-        p.stroke(G.polyline([[hx + 4, hy], [spec.text.x1, hy]], false), PAL.ink, 0.4, 0.9);
+        p.stroke(G.polyline(rule, false), PAL.ink, 0.4, 0.9);
         if (mark !== undefined) drawOrnament(mark, p, rng.fork("header"), [hx - 13, hy - 13, hx + 13, hy + 13]);
       },
+      lays: [
+        { at: [hx, hy], start: LAYING.gilt_delay, along: rule, half: 1, dur: G.length(rule) },
+        { at: [hx, hy], start: LAYING.gilt_delay, from: [hx, hy], reach: 20 },
+      ],
     });
   }
   // A pendant knot hangs in the foot's corner on a cord from the foliage
@@ -215,7 +223,7 @@ export function plant(spec: FloraSpec, pt: Painter, prog: Progress = Progress.of
         if (cord >= 6) g.box(x - 1, y + h / 2, x + 1, y + h / 2 + cord);
         else cord = 0;
         const box: [number, number, number, number] = [x - w / 2, y - h / 2, x + w / 2, y + h / 2];
-        orn.push({ paint: (p) => drawOrnament(pendant, p, r, box, { cord }) });
+        orn.push({ paint: (p) => drawOrnament(pendant, p, r, box, { cord }), at: [x, y] });
         break;
       }
     }
@@ -245,7 +253,9 @@ export function plant(spec: FloraSpec, pt: Painter, prog: Progress = Progress.of
     const r = rng.fork("chain" + fmt(k + 1, 0));
     // A run stopped by the cartouche's top hangs a knot over it.
     const foot = panel !== undefined && Math.abs(px - panel[0]) < panel[2] / 2 && rn[1] - (panel[1] + panel[3] / 2) < 8 && rn[1] > panel[1] ? "knot" : undefined;
-    orn.push({ paint: (p) => O.chain(p, r, px, rn[0], rn[1], foot) });
+    // The chain is drawn along its run as the front passes it.
+    const run: Pt[] = [[px, rn[0]], [px, rn[1]]];
+    orn.push({ paint: (p) => O.chain(p, r, px, rn[0], rn[1], foot), lays: [{ at: run[0], start: LAYING.gilt_delay, along: run, half: 8 }] });
   }
 
   // Blooms and sprays on branches to the largest holes, then details.
@@ -273,14 +283,25 @@ export function plant(spec: FloraSpec, pt: Painter, prog: Progress = Progress.of
   }
   for (const s of runners) stemBatch.stemBy(s.pts, s.width);
 
-  // Paint back to front. A "watch it grow" frame (spec.grow below 1)
-  // paints only what the growth front has reached (clock.ts); otherwise
-  // every element paints in full.
-  const clock = spec.grow !== undefined && spec.grow < 1 ? new GrowthClock(g, stems, spec.grow) : undefined;
-  pt.clock = clock;
-  const draw = (f: Piece, dur?: number, delay?: number): void => {
-    if (clock !== undefined) clock.draw(pt, f.paint, f.at, dur, delay);
-    else f.paint(pt);
+  // Paint back to front, each element laid down as the growth front
+  // reaches it (Painter.lay, timeline.ts) when the painter keeps the
+  // timeline or this is a "watch it grow" frame (spec.grow below 1). A
+  // frame paints the whole plant with its timeline and keeps only what the
+  // front has laid down by then, so every random stream is spent alike and
+  // the last frame is the finished page.
+  const framing = spec.grow !== undefined && spec.grow < 1;
+  const clock = framing || pt.timed ? new GrowthClock(g, stems) : undefined;
+  const reach = clock !== undefined ? clock.reach : 0;
+  const births0 = pt.births;
+  if (clock !== undefined) pt.births = (x, y) => clock.birth(x, y);
+  // An element opens out from where it stands, `delay` after the front
+  // reaches it, or is laid as its own lays say; one with no place of its
+  // own opens from its middle once the stems are grown.
+  const draw = (f: Piece, delay = 0): void => {
+    const at = f.at, lays = f.lays;
+    if (lays !== undefined) pt.lay(lays, () => f.paint(pt));
+    else if (at !== undefined) pt.lay([{ at, start: delay, from: at }], () => f.paint(pt));
+    else pt.lay([{ start: reach + delay, from: "middle" }], () => f.paint(pt));
   };
   // The painting's units (progress.ts), and a tally of those painted.
   const units = ctx.back.length + painted.length + ctx.leaves.length + BLOOM * ctx.blooms.length + (ctx.visitors ?? []).length + orn.length
@@ -291,50 +312,61 @@ export function plant(spec: FloraSpec, pt: Painter, prog: Progress = Progress.of
     done += n;
     painting.at(done / units);
   };
-  for (const f of ctx.back) {
-    draw(f, 0.1);
-    paid(1);
-  }
-  // Bottom to top, as in the reference: stems and sprays, then leaflets,
-  // then leaves, then blooms. Each leaf knocks out what lies under it.
-  const sr = rng.fork("stem paint");
-  for (const s of painted) {
-    if (clock !== undefined) clock.stem(pt, s, PLANT.root_width, (p) => BR.stem(p, sr, s.pts, s.width, PLANT));
-    else BR.stem(pt, sr, s.pts, s.width, PLANT);
-    paid(1);
-  }
-  stemBatch.paint(pt);
-  paid(BATCH.stems);
-  // Fine sprays are pen work in a diluted ink, lighter than the stems.
-  sprayBatch.paint(pt, mixInk(PAL.ink, PAL.sky, 0.4));
-  paid(BATCH.sprays);
-  if (clock !== undefined) clock.leaflets(pt, rng.fork("leaflets"), ctx.leaflets);
-  else L.leaflets(pt, rng.fork("leaflets"), ctx.leaflets);
-  paid(BATCH.leaflets);
-  for (const f of ctx.leaves) {
-    draw(f, 0.06);
-    paid(1);
-  }
-  for (const f of ctx.blooms) {
-    draw(f, 0.1, 10);
-    paid(BLOOM);
-  }
-  const heroPiece: Piece = { paint: (p) => F.hero(p, rng.fork("hero"), hero[0], hero[1], hero[2]), at: [hero[0], hero[1]] };
-  draw(heroPiece, 0.15);
-  paid(BATCH.hero);
-  const visitors: readonly Placed[] = ctx.visitors ?? [];
-  for (const f of visitors) {
-    draw(f, 0.08, clock === undefined ? undefined : clock.reach * 0.25);
-    paid(1);
-  }
-  for (const f of orn) {
-    draw(f, 0.15);
-    paid(1);
-  }
-  O.sparkles(pt, clock !== undefined ? clock.sparkles(sparkles) : sparkles);
-  if (spec.bare !== true) draw({ paint: (p) => O.compass(p, midfoot[0], midfoot[1], 7, { hair: 0.9, ring: 0 }) }, 0.15);
-  paid(BATCH.finish);
-  pt.clock = undefined;
+  const paintAll = (): void => {
+    for (const f of ctx.back) {
+      draw(f);
+      paid(1);
+    }
+    // Bottom to top, as in the reference: stems and sprays, then leaflets,
+    // then leaves, then blooms. Each leaf knocks out what lies under it.
+    // Stems, sprays, leaflets and leaves lay themselves down.
+    const sr = rng.fork("stem paint");
+    for (const s of painted) {
+      BR.stem(pt, sr, s.pts, s.width, PLANT);
+      paid(1);
+    }
+    stemBatch.paint(pt);
+    paid(BATCH.stems);
+    // Fine sprays are pen work in a diluted ink, lighter than the stems.
+    sprayBatch.paint(pt, mixInk(PAL.ink, PAL.sky, 0.4));
+    paid(BATCH.sprays);
+    L.leaflets(pt, rng.fork("leaflets"), ctx.leaflets);
+    paid(BATCH.leaflets);
+    for (const f of ctx.leaves) {
+      const at = f.at;
+      if (at !== undefined) pt.lay([{ at }], () => f.paint(pt));
+      else draw(f);
+      paid(1);
+    }
+    for (const f of ctx.blooms) {
+      draw(f, LAYING.bloom_delay);
+      paid(BLOOM);
+    }
+    const heroPiece: Piece = { paint: (p) => F.hero(p, rng.fork("hero"), hero[0], hero[1], hero[2]), at: [hero[0], hero[1]] };
+    draw(heroPiece);
+    paid(BATCH.hero);
+    const visitors: readonly Placed[] = ctx.visitors ?? [];
+    for (const f of visitors) {
+      draw(f, LAYING.visitor_delay);
+      paid(1);
+    }
+    for (const f of orn) {
+      draw(f, LAYING.gilt_delay);
+      paid(1);
+    }
+    // The gilt follows the plant: each sparkle, and the compass, a while
+    // after the front reaches it.
+    const sl = sparkles.map((sp): Lay => ({ at: [sp.x, sp.y], start: LAYING.gilt_delay, from: [sp.x, sp.y], reach: sp.r * 2 + 1, dur: 12 }));
+    if (sl.length > 0) pt.lay(sl, () => O.sparkles(pt, sparkles));
+    if (spec.bare !== true) {
+      pt.lay([{ at: midfoot, start: LAYING.gilt_delay, from: midfoot }], () => O.compass(pt, midfoot[0], midfoot[1], 7, { hair: 0.9, ring: 0 }));
+    }
+    paid(BATCH.finish);
+  };
+  const gu = spec.grow;
+  if (clock === undefined) paintAll();
+  else pt.recorded(paintAll, framing && gu !== undefined ? (items) => TL.frame(items, gu * TL.end(items)) : undefined);
+  pt.births = births0;
   const counts = ctx.counts;
   counts.leaves = ctx.leaves.length;
   return { coverage: g.coverage(), space: g, stems, hero, panel, ghost, counts, sparkles };
@@ -370,8 +402,16 @@ export function page(spec: FloraSpec, o: PageOptions = {}): Page {
   const frames = FR.of(spec);
   const planted: Planted[] = [];
   const prog = Progress.of(o.progress);
-  // What a layout paints under its plants (the scrollwork's band).
-  frames.before?.(pt);
+  // What a layout paints under its plants (the scrollwork's band), there
+  // from the start; with the timeline, what it paints over them (the
+  // title furniture, the bouquet's ribbons) is laid down once they are,
+  // spreading from its middle.
+  const before = frames.before;
+  if (before !== undefined) pt.lay([{}], () => before(pt));
+  const last = (fn: () => void): void => {
+    if (pt.timed) pt.lay([{ start: TL.end(pt.scene().items), from: "middle" }], fn);
+    else fn();
+  };
   // The plants share the page's progress equally; title furniture, when
   // painted, takes TITLE_SHARE of it after them.
   const titled = frames.title !== undefined && (spec.grow ?? 1) >= 0.9;
@@ -385,10 +425,12 @@ export function page(spec: FloraSpec, o: PageOptions = {}): Page {
   pt.frame(undefined);
   // Title furniture paints over the finished crowns, in page coordinates;
   // while the page grows it waits for the plants.
-  if (titled && frames.title !== undefined) Title.paint(pt, spec, frames.title);
+  const title = frames.title;
+  if (titled && title !== undefined) last(() => Title.paint(pt, spec, title));
   // What a layout paints over its plants (the bouquet's ribbons, the
   // scrollwork's head and foot).
-  frames.after?.(pt);
+  const after = frames.after;
+  if (after !== undefined) last(() => after(pt));
   prog.at(1);
   let coverage = 0;
   for (const p of planted) coverage += p.coverage / planted.length;

@@ -10,6 +10,7 @@ import "./plant.spec.ts";
 import "./grow.spec.ts";
 import "./ornament.spec.ts";
 import "./growth.spec.ts";
+import "./timeline.spec.ts";
 import "./geom.spec.ts";
 
 declare const _VERSION: string | undefined;

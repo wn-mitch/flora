@@ -2,19 +2,15 @@
 // (clock.ts), run here and against tikz-flora's visitor.lua and clock.lua
 // by tests/reference.ts. Each grows the same body page in both: leaves at
 // the nodes, tips, visitors, holes and details, as compose orders them.
-import * as BR from "../src/engine/brush.ts";
 import { GrowthClock } from "../src/engine/clock.ts";
 import * as G from "../src/engine/geom.ts";
 import type { Pt } from "../src/engine/geom.ts";
 import * as GR from "../src/engine/grow.ts";
 import * as LA from "../src/engine/layout.ts";
-import * as LF from "../src/engine/leaf.ts";
 import * as MX from "../src/engine/mix.ts";
-import { PAL, type Painter } from "../src/engine/paint.ts";
 import { Rng } from "../src/engine/rng.ts";
 import * as SP from "../src/engine/sprig.ts";
 import type { Space } from "../src/engine/space.ts";
-import { PLANT } from "../src/engine/tune.ts";
 import * as VI from "../src/engine/visitor.ts";
 import { CASES, lit, scene } from "./reference-cases.ts";
 
@@ -114,60 +110,21 @@ for (const side of [1, -1]) {
 scene("paint visitors visit 1", (pt) => { for (const v of page("visit 1", ALL).ctx.visitors ?? []) v.paint(pt); },
   `${LUA_PAGE}; local g, ctx = page("visit 1", ${lit(ALL)}); for _, f in ipairs(ctx.visitors) do f(pt) end`);
 
-// The clock on a grown page: its reach, birth times on a grid of probes
-// (some off the page, which clamp to its edge), what born answers there,
-// and which sparkles have arrived.
+// The clock on a grown page: its reach and birth times on a grid of probes
+// (some off the page, which clamp to its edge). Frames are no longer
+// compared: flora lays each stroke down (timeline.ts), where tikz-flora's
+// clock clips stems and scales elements.
 const probes: Pt[] = [];
 for (let x = -20; x <= 620; x += 37) for (let y = -15; y <= 860; y += 41) probes.push([x, y]);
-const sparkles = Array.from({ length: 12 }, (_, i) => ({ x: 20 + i * 9, y: 30 + i * 7, r: 2 }));
-for (const T of [0, 0.3, 0.7, 0.9]) {
-  add(`clock field ${T}`, () => {
-    const { g, strands } = page("clock", ALL);
-    const k = new GrowthClock(g, strands, T);
-    return [k.reach, k.span, k.u, probes.map((p) => k.birth(p[0], p[1])), probes.map((p) => k.born(p[0], p[1])), k.sparkles(sparkles).map((s) => [s.x, s.y, s.r])];
-  }, `(function() ${LUA_PAGE}
-    local CK = require("flora.clock")
-    local g, ctx, strands = page("clock", ${lit(ALL)})
-    local k = CK.new(g, strands, ${T})
-    local b, n = {}, {}
-    for i, p in ipairs(${lit(probes)}) do b[i] = k:birth(p[1], p[2]); n[i] = k:born(p[1], p[2]) end
-    return {k.reach, k.span, k.u, b, n, k:sparkles(${lit(sparkles.map((s) => [s.x, s.y, s.r]))})}
-  end)()`);
-}
-
-// Frames: the stems revealed up to the front, leaflets unfurling one by
-// one, and drawn elements (leaves, then visitors after their delay) grown
-// from their anchors. The leaflets are the batched kind (a flower's
-// sepals): washed leaflets differ from the Lua on purpose (see "paint
-// leaflets" in reference-cases.ts, tikz-flora TASK-40).
-const clockLua = (T: number, body: string) => `${LUA_PAGE}
+add("clock field", () => {
+  const { g, strands } = page("clock", ALL);
+  const k = new GrowthClock(g, strands);
+  return [k.reach, probes.map((p) => k.birth(p[0], p[1]))];
+}, `(function() ${LUA_PAGE}
   local CK = require("flora.clock")
-  local g, ctx, strands, pos = page("clock", ${lit(ALL)})
-  local k = CK.new(g, strands, ${T})
-  ${body}`;
-const clockTs = (T: number, fn: (pt: Painter, k: GrowthClock, p: Page) => void) => (pt: Painter) => {
-  const p = page("clock", ALL);
-  fn(pt, new GrowthClock(p.g, p.strands, T), p);
-};
-for (const T of [0.3, 0.7]) {
-  scene(`paint clock stems ${T}`, clockTs(T, (pt, k, p) => {
-    const sr = new Rng("stem paint");
-    for (const s of p.strands) k.stem(pt, s, PLANT.root_width, (q) => BR.stem(q, sr, s.pts, s.width ?? (() => 1), PLANT));
-  }), clockLua(T, `local sr = R.new("stem paint")
-    for _, s in ipairs(strands) do
-      k:stem(pt, s, TU.plant.root_width, function(p) BR.stem(p, sr, s.pts, s.width, TU.plant) end)
-    end`));
-  scene(`paint clock leaflets ${T}`, clockTs(T, (pt, k, p) => {
-    k.leaflets(pt, new Rng("leaflets"), p.ctx.leaflets.slice(0, 40), (q, r, items) => LF.leaflets(q, r, items, PAL.deep, 0.9));
-  }), clockLua(T, `local items = {}
-    for i = 1, math.min(40, #ctx.leaflets) do items[i] = ctx.leaflets[i] end
-    k:leaflets(pt, R.new("leaflets"), items, function(p, r, its) LF.leaflets(p, r, its, PAINT.palette.deep, 0.9) end)`));
-  scene(`paint clock leaves ${T}`, clockTs(T, (pt, k, p) => {
-    for (const l of p.ctx.leaves) k.draw(pt, l.paint, l.at, 0.06);
-  }), clockLua(T, "for _, f in ipairs(ctx.leaves) do k:draw(pt, f, pos[f], 0.06) end"));
-  scene(`paint clock visitors ${T}`, clockTs(T, (pt, k, p) => {
-    for (const v of p.ctx.visitors ?? []) k.draw(pt, v.paint, v.at, 0.08, k.reach * 0.25);
-    k.draw(pt, (q) => q.stroke([["m", 10, 10], ["l", 40, 30]], PAL.ink, 1), undefined, 0.15);
-  }), clockLua(T, `for _, f in ipairs(ctx.visitors) do k:draw(pt, f, pos[f], 0.08, k.reach * 0.25) end
-    k:draw(pt, function(p) p:stroke({{"m", 10, 10}, {"l", 40, 30}}, PAINT.palette.ink, 1) end, nil, 0.15)`));
-}
+  local g, ctx, strands = page("clock", ${lit(ALL)})
+  local k = CK.new(g, strands, 1)
+  local b = {}
+  for i, p in ipairs(${lit(probes)}) do b[i] = k:birth(p[1], p[2]) end
+  return {k.reach, b}
+end)()`);

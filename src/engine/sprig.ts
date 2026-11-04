@@ -1,7 +1,7 @@
 // Line-work plants: stems, tendrils, umbels, forget-me-not cymes and
 // baby's-breath sprays. Strokes are collected into width buckets and
 // painted in a few batched fills.
-import { mod } from "#platform";
+import { mod, sortNumbers } from "#platform";
 import * as C from "./color.ts";
 import type { RGB } from "./color.ts";
 import { sample } from "./dist.ts";
@@ -9,7 +9,7 @@ import { bud, florets, type Floret } from "./flower.ts";
 import * as G from "./geom.ts";
 import type { Cmd, Pt } from "./geom.ts";
 import type { Leaflet } from "./leaf.ts";
-import { PAL, type Clock, type Painter } from "./paint.ts";
+import { PAL, type Lay, type Painter } from "./paint.ts";
 import type { Rng } from "./rng.ts";
 import { SIZES } from "./tune.ts";
 
@@ -30,10 +30,19 @@ interface Star {
   readonly r: number;
 }
 
+// Growth a floret, bud or star takes to open, per pt of its size.
+const OPEN = 3;
+// A timed batch's parts each hold what starts within this much growth.
+const BUCKET = 16;
+
 // Collects stems and florets, then paints them in batches.
 export class Batch {
   ribbons: Cmd[][] = [];
   lines: Cmd[][][] = [[], [], []];
+  // Each ribbon's and line's centreline and half width, which the pen
+  // follows as it lays them down.
+  spines: [Pt[], number][] = [];
+  lineSpines: Pt[][][] = [[], [], []];
   florets: Floret[] = [];
   buds: Bud[] = [];
   stars: Star[] = [];
@@ -41,16 +50,21 @@ export class Batch {
   // A tapered stem from w0 to w1 (full widths, pt), filled as a ribbon.
   stem(pts: readonly Pt[], w0: number, w1: number): void {
     this.ribbons.push(G.smooth(G.ribbon(pts, (t) => (w0 + (w1 - w0) * t) / 2), true));
+    this.spines.push([pts.slice(), Math.max(w0, w1) / 2]);
   }
 
   // A stem whose full width at fraction t is w(t).
   stemBy(pts: readonly Pt[], w: (t: number) => number): void {
     this.ribbons.push(G.smooth(G.ribbon(pts, (t) => w(t) / 2), true));
+    let wmax = 0;
+    for (let i = 0; i <= 10; i++) wmax = Math.max(wmax, w(i / 10));
+    this.spines.push([pts.slice(), wmax / 2]);
   }
 
   // A hairline; `cls` 1-3 selects 0.32, 0.22 or 0.14 pt.
   line(pts: readonly Pt[], cls: 1 | 2 | 3 = 2): void {
     this.lines[cls - 1].push(G.smooth(pts, false));
+    this.lineSpines[cls - 1].push(pts.slice());
   }
 
   // A five-petalled floret; `soft` paints it as baby's breath (flower.ts
@@ -89,38 +103,82 @@ export class Batch {
   // Append everything collected in `other`.
   merge(other: Batch): void {
     for (const c of other.ribbons) this.ribbons.push(c);
+    for (const c of other.spines) this.spines.push(c);
     for (let i = 0; i < 3; i++) for (const c of other.lines[i]) this.lines[i].push(c);
+    for (let i = 0; i < 3; i++) for (const c of other.lineSpines[i]) this.lineSpines[i].push(c);
     for (const f of other.florets) this.florets.push(f);
     for (const b of other.buds) this.buds.push(b);
     for (const s of other.stars) this.stars.push(s);
   }
 
-  // Only the items already born on growth clock `clock`: each pops in when
-  // the front reaches its first point.
-  born(clock: Clock): Batch {
-    const b = new Batch();
-    const first = (c: readonly Cmd[]) => {
-      const op = c[0];
-      return op !== undefined && op[0] !== "z" && clock.born(op[1], op[2]);
-    };
-    for (const c of this.ribbons) if (first(c)) b.ribbons.push(c);
-    for (let i = 0; i < 3; i++) for (const c of this.lines[i]) if (first(c)) b.lines[i].push(c);
-    for (const f of this.florets) if (clock.born(f.x, f.y)) b.florets.push(f);
-    for (const d of this.buds) if (clock.born(d.x, d.y)) b.buds.push(d);
-    for (const s of this.stars) if (clock.born(s.x, s.y)) b.stars.push(s);
-    return b;
+  // How the pen lays the batch down: along each stem and line from where
+  // it starts, and each floret, bud and star opening from its middle.
+  lays(): Lay[] {
+    const out: Lay[] = [];
+    for (const [pts, half] of this.spines) if (pts.length > 0) out.push({ at: pts[0], along: pts, half: half + 1 });
+    for (let i = 0; i < 3; i++) {
+      for (const pts of this.lineSpines[i]) if (pts.length > 0) out.push({ at: pts[0], along: pts, half: WIDTHS[i] + 1 });
+    }
+    for (const f of this.florets) out.push({ at: [f.x, f.y], from: [f.x, f.y], reach: f.r * 1.6 + 1, dur: OPEN * f.r });
+    for (const d of this.buds) out.push({ at: [d.x, d.y], from: [d.x, d.y], reach: d.len * 1.3 + 1, dur: OPEN * d.len });
+    for (const st of this.stars) out.push({ at: [st.x, st.y], from: [st.x, st.y], reach: st.r * 1.2 + 1, dur: OPEN * st.r });
+    return out;
   }
 
   // Paint everything collected in `ink` (navy by default), recoloured by
-  // the palette's sprays; under the painter's clock, only what is born.
+  // the palette's sprays, laid down as lays() describes.
+  //
+  // Keeping the timeline, the batch is also painted in parts, each holding
+  // what starts within the same BUCKET of growth, so a frame clips only the
+  // few parts being laid down; once every part is, the frame shows the
+  // batch painted whole, as without the timeline.
   paint(pt: Painter, ink: RGB = PAL.ink): void {
-    const clock = pt.clock;
-    if (clock !== undefined) {
-      pt.clock = undefined;
-      this.born(clock).paint(pt, ink);
-      pt.clock = clock;
+    const lays = this.lays();
+    if (lays.length === 0) return;
+    const births = pt.births;
+    if (!pt.timed || births === undefined) {
+      pt.lay(lays, () => this.paintAll(pt, ink));
       return;
     }
+    const parts = new Map<number, Batch>();
+    const part = (p: Pt): Batch => {
+      const k = Math.floor(births(p[0], p[1]) / BUCKET);
+      let b = parts.get(k);
+      if (b === undefined) {
+        b = new Batch();
+        parts.set(k, b);
+      }
+      return b;
+    };
+    for (let i = 0; i < this.spines.length; i++) {
+      const sp = this.spines[i];
+      if (sp[0].length === 0) continue;
+      const b = part(sp[0][0]);
+      b.ribbons.push(this.ribbons[i]);
+      b.spines.push(sp);
+    }
+    for (let c = 0; c < 3; c++) {
+      for (let i = 0; i < this.lineSpines[c].length; i++) {
+        const sp = this.lineSpines[c][i];
+        if (sp.length === 0) continue;
+        const b = part(sp[0]);
+        b.lines[c].push(this.lines[c][i]);
+        b.lineSpines[c].push(sp);
+      }
+    }
+    for (const f of this.florets) part([f.x, f.y]).florets.push(f);
+    for (const d of this.buds) part([d.x, d.y]).buds.push(d);
+    for (const st of this.stars) part([st.x, st.y]).stars.push(st);
+    const keys: number[] = [];
+    parts.forEach((_, k) => keys.push(k));
+    sortNumbers(keys);
+    pt.batched(keys.map((k) => {
+      const b = parts.get(k) as Batch;
+      return { lays: b.lays(), paint: () => b.paintAll(pt, ink) };
+    }), () => this.paintAll(pt, ink));
+  }
+
+  private paintAll(pt: Painter, ink: RGB): void {
     const tint = C.partInk("sprays", pt.palette);
     const col = C.recolor(ink, tint);
     if (this.ribbons.length > 0) pt.fillMany(this.ribbons, col, 0.92, { blend: "multiply" });

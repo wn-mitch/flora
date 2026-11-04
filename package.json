@@ -1,6 +1,6 @@
 {
   "name": "@alpaca-software/web-flora",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Procedural watercolour plants for web pages: grows them around your text and draws them with WebGL2 or a 2D canvas",
   "keywords": [
     "watercolour",
