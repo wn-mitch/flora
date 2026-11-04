@@ -7,3 +7,4 @@ export { toDisplayList } from "./scene.ts";
 export { Timeline } from "./timeline.ts";
 export { meshOf, type Mesh } from "./mesh.ts";
 export { MeshRenderer, type MeshDrawOptions } from "./meshgl.ts";
+export * as grow from "./grow/index.ts";

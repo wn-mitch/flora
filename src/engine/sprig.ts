@@ -125,6 +125,12 @@ export class Batch {
     return out;
   }
 
+  // Paint everything collected in `ink`, laid down as `lays` describe: for
+  // a caller that times the batch itself.
+  paintLaid(pt: Painter, lays: readonly Lay[], ink: RGB = PAL.ink): void {
+    pt.lay(lays, () => this.paintAll(pt, ink));
+  }
+
   // Paint everything collected in `ink` (navy by default), recoloured by
   // the palette's sprays, laid down as lays() describes.
   //

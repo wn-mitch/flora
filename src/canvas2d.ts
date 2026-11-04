@@ -26,15 +26,18 @@ export function toPath2D(path: Path): Path2D {
 }
 
 // Draw `list` on `ctx`, whose canvas it covers, under the same options as
-// WebGLRenderer.draw.
-export function drawCanvas2D(ctx: Ctx, list: DisplayList, o: DrawOptions): void {
+// WebGLRenderer.draw. With `clear` false, it is drawn over what the canvas
+// holds, and `background` is ignored.
+export function drawCanvas2D(ctx: Ctx, list: DisplayList, o: DrawOptions & { readonly clear?: boolean }): void {
   const s = o.scale;
   const images = new Map<Image, OffscreenCanvas>();
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalCompositeOperation = "source-over";
   ctx.globalAlpha = 1;
-  if (o.background) {
+  if (o.clear === false) {
+    // Drawn over what is there.
+  } else if (o.background) {
     const [r, g, b] = o.background;
     ctx.fillStyle = `rgb(${r * 255},${g * 255},${b * 255})`;
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);

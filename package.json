@@ -47,7 +47,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && perl -pi -e 's{\"#platform\"}{\"./platform.js\"}g' dist/engine/*.js dist/engine/*.d.ts && perl -pi -e 's{\"(\\.\\.?/[^\"]*)\\.ts\"}{\"$1.js\"}g' dist/*.d.ts dist/engine/*.d.ts",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && perl -pi -e 's{\"#platform\"}{\"./platform.js\"}g' dist/engine/*.js dist/engine/*.d.ts && perl -pi -e 's{\"(\\.\\.?/[^\"]*)\\.ts\"}{\"$1.js\"}g' dist/*.d.ts dist/engine/*.d.ts dist/grow/*.d.ts",
     "prepare": "npm run build",
     "prepublishOnly": "npm run typecheck && npm test && node tests/package.mjs",
     "typecheck": "tsc --noEmit",
