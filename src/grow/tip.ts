@@ -178,9 +178,10 @@ export class Tip {
         this.goal = w.seek(this.x, this.y);
         this.seekAt = this.s + 20;
       }
-      // Behind what spans the margin, where only stems run, it hangs on
-      // down however far the food beyond lies.
-      this.lost = this.goal === undefined && w.parts(this.x, this.y) ? this.lost + 1 : 0;
+      // A strand twined with others hangs on down its line, as does any
+      // stem behind what spans the margin, however far the food beyond
+      // lies; each ends at the foot.
+      this.lost = this.goal === undefined && this.twine === undefined && w.parts(this.x, this.y) ? this.lost + 1 : 0;
       // No food left within reach: the stem has done its work.
       if (this.lost > 30) return this.end(w);
       if (this.goal !== undefined) {
@@ -228,7 +229,9 @@ export class Tip {
       for (let d = 6; d <= 60; d += 6) if (w.open(this.x, this.y - d)) return false;
       return true;
     };
-    const most = this.main && !(Math.sin(this.a) < -0.3 && !clear(a) && floor()) ? 16 : 0;
+    // Up to a little past a right angle either way, so one that meets a
+    // wall head on can turn along it.
+    const most = this.main && !(Math.sin(this.a) < -0.3 && !clear(a) && floor()) ? 26 : 0;
     while (!clear(a) && tries < most) {
       tries++;
       a = this.a + (tries % 2 === 1 ? 1 : -1) * 0.13 * Math.ceil(tries / 2);

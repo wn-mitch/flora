@@ -59,10 +59,12 @@ export interface GardenOptions {
   readonly gaps?: boolean;
 }
 
-// Pt of growth shared among the tips each tick, and the most one takes.
-const BUDGET = 2.2, MAX_SHARE = 1.6;
-// Pt of stem each stem's pen inks per tick, and the stretch inked at once.
-const INK = 1.6, CHUNK = 36, FIRST_CHUNK = 4;
+// Pt of growth shared among the tips each tick, and the most one takes;
+// and how far a strand may trail the deepest stem, pt, before it hurries.
+const BUDGET = 2.2, MAX_SHARE = 1.6, CATCH_UP = 60;
+// Pt of stem a stem's pen inks per tick at most and at least, and the
+// stretch inked at once.
+const INK = 1.6, SLOW_INK = 0.3, CHUNK = 36, FIRST_CHUNK = 4;
 // The most tips growing at once.
 const MAX_TIPS = 36;
 // Pt of stem grown before a tip may end in the hero.
@@ -80,9 +82,11 @@ const REACH = 300;
 const BEHIND = 40;
 
 interface Ink {
-  // The point of the tip's stem inked up to, and the tick its pen is free.
+  // The point of the tip's stem inked up to, the tick its pen is free,
+  // and the tick that stretch was taken up.
   from: number;
   free: number;
+  cut: number;
   // What waits for the ink to reach it, by stem arc.
   waiting: { arc: number; make: Make }[];
 }
@@ -286,6 +290,9 @@ export class Garden implements World {
       let share = sum > 0 ? Math.min(MAX_SHARE, (BUDGET * want[i]) / sum) : 0.4;
       // A side shoot too, so none lingers far behind the front.
       share = Math.max(share, tp.main ? 0.5 : 0.6);
+      // A strand behind the deepest stem catches up, so the strands grow
+      // down twined together rather than strung out down the page.
+      if (tp.twine !== undefined) share = Math.min(MAX_SHARE, share + Math.max(0, tp.y - this.deepest - CATCH_UP) / 120);
       tp.starved = share < 0.15 ? tp.starved + 1 : 0;
       if (tp.starved > 150) tp.end(this);
       tp.credit += share;
@@ -324,7 +331,7 @@ export class Garden implements World {
     this.tips.push(tp);
     this.grownTips.push(tp);
     this.tips.sort((p, q) => p.id - q.id);
-    this.inks.set(id, { from: 0, free: this.tick, waiting: [] });
+    this.inks.set(id, { from: 0, free: this.tick, cut: this.tick, waiting: [] });
     return tp;
   }
 
@@ -339,23 +346,28 @@ export class Garden implements World {
       const j0 = i0;
       const pts = tp.pts.slice(j0, i1 + 1), s0 = tp.arc[j0], s1 = tp.arc[i1];
       const start = Math.max(this.tick, e.free);
+      // The pen keeps the pace the tip grew this stretch at, so it reaches
+      // the stretch's end as the next is grown and runs on without a halt;
+      // the first stretch it inks at once.
+      const ink = j0 === 0 ? INK : G.clamp((s1 - s0) / Math.max(1, this.tick - e.cut), SLOW_INK, INK);
+      e.cut = this.tick;
       const id = this.nextId++;
       const rng = this.rng.fork("stem:" + id);
-      this.add(P.pieceOf(this.ink, id, "stem", start, INK, pts[0], (pt) => P.stem(pt, rng, pts, tp.width(s0), tp.width(s1))));
+      this.add(P.pieceOf(this.ink, id, "stem", start, ink, pts[0], (pt) => P.stem(pt, rng, pts, tp.width(s0), tp.width(s1))));
       // With gaps and depth, paper either side of it over what is behind.
       if (this.o.gaps === true && this.o.depth === true) {
         const w0 = tp.width(s0), w1 = tp.width(s1);
         // Its stem's id, negated, so turning gaps on changes nothing that grows.
-        this.add(P.pieceOf(this.ink, -id, "stem", start, INK, pts[0], (pt) => P.lift(pt, pts, w0, w1, OVER_GAP), P.Z.lift));
+        this.add(P.pieceOf(this.ink, -id, "stem", start, ink, pts[0], (pt) => P.lift(pt, pts, w0, w1, OVER_GAP), P.Z.lift));
       }
       // When the ink reaches each cell of the stretch.
-      for (let i = i0; i <= i1; i++) this.inked(tp.pts[i][0], tp.pts[i][1], start + (tp.arc[i] - s0) / INK);
-      if (tp.order === 0 && this.o.weave !== false) this.over(tp, i0, i1, (i) => start + (tp.arc[i] - s0) / INK);
-      e.free = start + (s1 - tp.arc[i0]) / INK;
+      for (let i = i0; i <= i1; i++) this.inked(tp.pts[i][0], tp.pts[i][1], start + (tp.arc[i] - s0) / ink);
+      if (tp.order === 0 && this.o.weave !== false) this.over(tp, i0, i1, (i) => start + (tp.arc[i] - s0) / ink);
+      e.free = start + (s1 - tp.arc[i0]) / ink;
       e.from = i1;
       const ready = e.waiting.filter((wt) => wt.arc <= s1 + 1e-9);
       e.waiting = e.waiting.filter((wt) => wt.arc > s1 + 1e-9);
-      for (const wt of ready) this.make(Math.ceil(start + Math.max(0, wt.arc - s0) / INK), wt.make);
+      for (const wt of ready) this.make(Math.ceil(start + Math.max(0, wt.arc - s0) / ink), wt.make);
     }
     if (last) {
       for (const wt of e.waiting) this.make(Math.ceil(e.free), wt.make);
@@ -408,7 +420,11 @@ export class Garden implements World {
   room(x: number, y: number): number {
     // Where only stems run (behind what spans the margin) nothing else is
     // put, so a stem steers through as through open room.
-    if (this.space.textAt(x, y)) return BEHIND;
+    // The region's edges still press on it there.
+    if (this.space.textAt(x, y)) {
+      const [x0, x1] = this.span(y);
+      return Math.max(0, Math.min(BEHIND, x - x0, x1 - x));
+    }
     return Math.max(0, this.space.room(x, y));
   }
   open(x: number, y: number): boolean {

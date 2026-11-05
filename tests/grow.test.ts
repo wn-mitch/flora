@@ -249,6 +249,16 @@ test("behind a tall band where only stems run, the strands run on through it as 
     for (const l of lines) assert.ok(turning(l, band[1], band[3]) < 1.3, `seed ${seed}: a stem turns ${turning(l, band[1], band[3]).toFixed(2)} rad per 60 pt in the band`);
     assert.ok(g.reach >= H - 40, `seed ${seed}: the ink reaches ${g.reach.toFixed(0)} of ${H}`);
   }
+  // A wide margin with the band two thirds down, as the site's home page
+  // has it: every strand from the root runs on through it to the foot, so
+  // the margin below is as full of stems as above.
+  for (const seed of [81044420, 81044421, 9]) {
+    const W = 436, h = 5896, m = 406;
+    const { g } = grow({ width: W, height: h, open: [[0, 0, m, h]], stems: [[0, 1959, W, 2453]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed, depth: true, gaps: true });
+    const strands = g.stemLines.filter((l) => Math.hypot(l[0][0] - m * 0.75, l[0][1] - (h - 4)) < 1);
+    assert.equal(strands.length, 3, `seed ${seed}: strands`);
+    for (const l of strands) assert.ok(l[l.length - 1][1] < 40, `seed ${seed}: a strand ends at (${l[l.length - 1].map((v) => v.toFixed(0))}), short of the foot`);
+  }
 });
 
 test("gilt sits in islands, clear of every stem", () => {
@@ -261,5 +271,46 @@ test("gilt sits in islands, clear of every stem", () => {
       for (const l of g.stemLines) for (const q of l) d = Math.min(d, Math.hypot(q[0] - p.at[0], q[1] - p.at[1]));
       assert.ok(d >= 15, `seed ${seed}: gilt ${p.id} ${d.toFixed(1)} pt from a stem`);
     }
+  }
+});
+
+test("a strand's pen runs on from stretch to stretch without waiting on its tip", () => {
+  for (const seed of [1, 2]) {
+    const W = 436, h = 3000, m = 406;
+    const { g, pieces } = grow({ width: W, height: h, open: [[0, 0, m, h]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed });
+    const stems = pieces.filter((p) => p.kind === "stem" && p.z === Z.stem);
+    let idle = 0, busy = 0;
+    for (const line of g.stemLines.slice(0, 3)) {
+      // Each stretch starts at a point of the line it is a stretch of.
+      const at = new Map(line.map((q, i) => [`${q[0]},${q[1]}`, i]));
+      const runs = stems.filter((p) => at.has(`${p.at[0]},${p.at[1]}`)).sort((a, b) => at.get(`${a.at[0]},${a.at[1]}`)! - at.get(`${b.at[0]},${b.at[1]}`)!);
+      assert.ok(runs.length > 20, `seed ${seed}: ${runs.length} stretches`);
+      for (let i = 0; i < runs.length; i++) {
+        busy += runs[i].end - runs[i].start;
+        if (i > 0) idle += Math.max(0, runs[i].start - runs[i - 1].end);
+      }
+    }
+    assert.ok(idle / (idle + busy) < 0.05, `seed ${seed}: the pens wait ${((100 * idle) / (idle + busy)).toFixed(0)}% of the time`);
+  }
+});
+
+test("the strands grow down together, and each runs on past a wall it meets head on", () => {
+  for (const seed of [1, 2, 3]) {
+    const W = 436, h = 5896, m = 406;
+    const g = new Garden({ width: W, height: h, open: [[0, 0, m, h]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed });
+    let apart = 0;
+    while (!g.done && g.tick < 60000) {
+      g.step(20);
+      // The strands' tips: the stems from the root still growing.
+      const tips = g.stemLines.slice(0, 3).map((l) => l[l.length - 1][1]);
+      if (tips.every((y) => y > 40)) apart = Math.max(apart, Math.max(...tips) - Math.min(...tips));
+    }
+    assert.ok(apart < 300, `seed ${seed}: strands ${apart.toFixed(0)} rows apart`);
+  }
+  // Seeds whose strands once met the margin's edge in the band head on.
+  for (const seed of [1, 5, 12, 20]) {
+    const W = 436, h = 3000, m = 406;
+    const { g } = grow({ width: W, height: h, open: [[0, 0, m, h]], stems: [[0, 1200, W, 1700]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed });
+    for (const l of g.stemLines.slice(0, 3)) assert.ok(l[l.length - 1][1] < 40, `seed ${seed}: a strand ends at (${l[l.length - 1].map((v) => v.toFixed(0))})`);
   }
 });
