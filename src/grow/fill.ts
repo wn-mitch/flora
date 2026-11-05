@@ -28,6 +28,8 @@ export interface Host {
   stem(x: number, y: number): boolean;
   // The tick the ink reaches (x, y), Infinity if it has not been laid.
   inkTick(x: number, y: number): number;
+  // The pace of the ink there, pt per tick: a spray from it runs at it.
+  paceAt(x: number, y: number): number;
   claim(x: number, y: number, r: number, k: number): void;
   add(p: Piece): void;
   // A new component's id; and that the hero is placed.
@@ -74,7 +76,7 @@ export class Fill {
       // Not before the stem it grows from is inked there.
       const ink = this.h.inkTick(s[0], s[1]);
       if (ink === Infinity) continue;
-      const id = this.h.id(), at = Math.max(this.h.tick + 10 + 5 * n, Math.ceil(ink) + 2), pr = this.h.rng.fork("hole:" + id);
+      const id = this.h.id(), at = Math.max(this.h.tick + 10 + 5 * n, Math.ceil(ink) + 2), pr = this.h.rng.fork("hole:" + id), pace = this.h.paceAt(s[0], s[1]);
       n++;
       const bloom = r >= 16 && rng.chance(0.25);
       const kind = rng.weighted(r > 18 ? { gyps: 5, cyme: 2, umbel: 1.2 } : { gyps: 5, cyme: 2 }) ?? "gyps";
@@ -82,8 +84,8 @@ export class Fill {
       for (let k = bloom ? Math.min(26, r * 0.75) : Math.min(28, r * 0.8), tries = 0; tries < 3 && k >= 6; tries++, k *= 0.7) {
         const R = k;
         const piece = bloom
-          ? P.pieceOf(this.h.ink, id, "bloom", at, 1, s, (pt) => P.stalked(pt, pr.clone(), s, G.angle(s, [x, y]), x, y, R))
-          : P.pieceOf(this.h.ink, id, "spray", at, 1, s, (pt) => P.spray(pt, pr.clone(), kind, s, G.angle(s, [x, y]), x, y, R));
+          ? P.pieceOf(this.h.ink, id, "bloom", at, pace, s, (pt) => P.stalked(pt, pr.clone(), s, G.angle(s, [x, y]), x, y, R))
+          : P.pieceOf(this.h.ink, id, "spray", at, pace, s, (pt) => P.spray(pt, pr.clone(), kind, s, G.angle(s, [x, y]), x, y, R));
         if (!this.within(piece)) continue;
         this.h.claim(x, y, R, 0.9);
         this.h.add(piece);
@@ -151,7 +153,7 @@ export class Fill {
       if (s === undefined) continue;
       this.h.claim(x, y, r, 0.85);
       const id = this.h.id(), rng = this.h.rng.fork("hero:" + id);
-      this.h.add(P.pieceOf(this.h.ink, id, "hero", this.h.tick + 20, 1, s, (pt) => P.stalkedHero(pt, rng, s, x, y, r)));
+      this.h.add(P.pieceOf(this.h.ink, id, "hero", this.h.tick + 20, this.h.paceAt(s[0], s[1]), s, (pt) => P.stalkedHero(pt, rng, s, x, y, r)));
       return;
     }
   }

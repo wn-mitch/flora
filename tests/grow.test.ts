@@ -349,3 +349,37 @@ test("strands run down into a band where only stems run rather than loop back al
     for (const l of strands) assert.ok(climb(l) < 30, `width ${W} seed ${seed}: a strand climbs ${climb(l).toFixed(0)} pt back up`);
   }
 });
+
+test("a spray runs out from its stem no faster than the stem's own ink runs there", () => {
+  for (const seed of [1, 81044420]) {
+    const W = 436, h = 3000, m = 406;
+    const { pieces } = grow({ width: W, height: h, open: [[0, 0, m, h]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed });
+    const stems = pieces.filter((p) => p.kind === "stem" && p.z === Z.stem);
+    // The fastest pace of the stem stretches painted within 4 pt of page
+    // point q (where stems cross, either may be the one it grows from).
+    const paceAt = (q: Pt) => {
+      let pace = NaN;
+      for (const s of stems) {
+        // Boxes run down the page, points up it.
+        const qy = h - q[1];
+        if (q[0] < s.box[0] - 4 || q[0] > s.box[2] + 4 || qy < s.box[1] - 4 || qy > s.box[3] + 4) continue;
+        let near = false;
+        points(s, h, (x, y) => {
+          near ||= Math.hypot(x - q[0], y - q[1]) < 4;
+        });
+        if (near && !(s.rate <= pace)) pace = s.rate;
+      }
+      return pace;
+    };
+    // A spray's lines are inked a pt per pt of its own growth (sprayLays),
+    // so its rate is how fast its ink runs out, pt a tick.
+    let checked = 0;
+    for (const p of pieces.filter((p) => p.kind === "spray")) {
+      const pace = paceAt(p.at);
+      if (Number.isNaN(pace)) continue;
+      checked++;
+      assert.ok(p.rate <= pace + 1e-9, `seed ${seed}: spray ${p.id} inks ${p.rate.toFixed(2)} pt a tick, its stem ${pace.toFixed(2)}`);
+    }
+    assert.ok(checked > 40, `seed ${seed}: ${checked} sprays checked`);
+  }
+});

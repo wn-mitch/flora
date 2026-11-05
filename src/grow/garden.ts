@@ -83,10 +83,11 @@ const BEHIND = 40;
 
 interface Ink {
   // The point of the tip's stem inked up to, the tick its pen is free,
-  // and the tick that stretch was taken up.
+  // the tick that stretch was taken up, and the pace it inks at, pt a tick.
   from: number;
   free: number;
   cut: number;
+  pace: number;
   // What waits for the ink to reach it, by stem arc.
   waiting: { arc: number; make: Make }[];
 }
@@ -106,6 +107,8 @@ export class Garden implements World {
   private readonly stems: Uint8Array;
   // The tick the ink reaches each cell of a stem (0: none yet).
   private readonly inkAt: Float64Array;
+  // The pace the ink reaching each cell first runs at, pt per tick.
+  private readonly inkPace: Float64Array;
   private readonly rng: Rng;
   private readonly ink: P.Ink;
   private nextId = 1;
@@ -150,6 +153,7 @@ export class Garden implements World {
     this.space = g;
     this.stems = new Uint8Array(g.nx * g.ny);
     this.inkAt = new Float64Array(g.nx * g.ny);
+    this.inkPace = new Float64Array(g.nx * g.ny);
     // No food hard by the region's edge, which a stem would run along.
     this.food = new Food(o.width, o.height, 3, (k) => this.rng.fork("band:" + k), (x, y) => this.space.free(x, y) && this.room(x, y) >= 12);
     this.maxSprouts = 4 + Math.ceil(o.height / 200);
@@ -164,6 +168,7 @@ export class Garden implements World {
       parts: (x, y) => this.parts(x, y),
       stem: (x, y) => this.stem(x, y),
       inkTick: (x, y) => this.inkTick(x, y),
+      paceAt: (x, y) => this.paceAt(x, y),
       claim: (x, y, r, k) => this.claim(x, y, r, k),
       add: (p) => this.add(p),
       id: () => this.nextId++,
@@ -331,7 +336,7 @@ export class Garden implements World {
     this.tips.push(tp);
     this.grownTips.push(tp);
     this.tips.sort((p, q) => p.id - q.id);
-    this.inks.set(id, { from: 0, free: this.tick, cut: this.tick, waiting: [] });
+    this.inks.set(id, { from: 0, free: this.tick, cut: this.tick, pace: INK, waiting: [] });
     return tp;
   }
 
@@ -351,6 +356,7 @@ export class Garden implements World {
       // the first stretch it inks at once.
       const ink = j0 === 0 ? INK : G.clamp((s1 - s0) / Math.max(1, this.tick - e.cut), SLOW_INK, INK);
       e.cut = this.tick;
+      e.pace = ink;
       const id = this.nextId++;
       const rng = this.rng.fork("stem:" + id);
       this.add(P.pieceOf(this.ink, id, "stem", start, ink, pts[0], (pt) => P.stem(pt, rng, pts, tp.width(s0), tp.width(s1))));
@@ -361,16 +367,16 @@ export class Garden implements World {
         this.add(P.pieceOf(this.ink, -id, "stem", start, ink, pts[0], (pt) => P.lift(pt, pts, w0, w1, OVER_GAP), P.Z.lift));
       }
       // When the ink reaches each cell of the stretch.
-      for (let i = i0; i <= i1; i++) this.inked(tp.pts[i][0], tp.pts[i][1], start + (tp.arc[i] - s0) / ink);
+      for (let i = i0; i <= i1; i++) this.inked(tp.pts[i][0], tp.pts[i][1], start + (tp.arc[i] - s0) / ink, ink);
       if (tp.order === 0 && this.o.weave !== false) this.over(tp, i0, i1, (i) => start + (tp.arc[i] - s0) / ink);
       e.free = start + (s1 - tp.arc[i0]) / ink;
       e.from = i1;
       const ready = e.waiting.filter((wt) => wt.arc <= s1 + 1e-9);
       e.waiting = e.waiting.filter((wt) => wt.arc > s1 + 1e-9);
-      for (const wt of ready) this.make(Math.ceil(start + Math.max(0, wt.arc - s0) / ink), wt.make);
+      for (const wt of ready) this.make(Math.ceil(start + Math.max(0, wt.arc - s0) / ink), wt.make, ink);
     }
     if (last) {
-      for (const wt of e.waiting) this.make(Math.ceil(e.free), wt.make);
+      for (const wt of e.waiting) this.make(Math.ceil(e.free), wt.make, e.pace);
       e.waiting = [];
     }
   }
@@ -388,8 +394,9 @@ export class Garden implements World {
     }
   }
 
-  // Start `make` at tick `at`: paint it now, laid down from then.
-  private make(at: number, m: Make): void {
+  // Start `make` at tick `at`: paint it now, laid down from then; `pace`
+  // is that of the ink of the stem it grows from there, pt a tick.
+  private make(at: number, m: Make, pace: number): void {
     const id = this.nextId++;
     const rng = this.rng.fork(m.kind + ":" + id);
     if (m.kind === "tip") {
@@ -399,10 +406,12 @@ export class Garden implements World {
       return;
     }
     let piece: Piece;
+    // What runs out on a stalk from the stem inks it at the stem's pace
+    // there, so it does not leap out ahead of the stem it grows from.
     if (m.kind === "leaf") piece = P.pieceOf(this.ink, id, "leaf", at, 1, [m.x, m.y], m.paint);
-    else if (m.kind === "spray") piece = P.pieceOf(this.ink, id, "spray", at, 1, m.s, (pt) => P.spray(pt, rng, m.spray, m.s, m.tangent, m.x, m.y, m.r));
-    else if (m.kind === "stalk") piece = P.pieceOf(this.ink, id, "bloom", at, 1, m.s, (pt) => P.stalked(pt, rng, m.s, m.tangent, m.x, m.y, m.r));
-    else if (m.kind === "hero") piece = P.pieceOf(this.ink, id, "hero", at, 1, m.s, (pt) => P.stalkedHero(pt, rng, m.s, m.x, m.y, m.r));
+    else if (m.kind === "spray") piece = P.pieceOf(this.ink, id, "spray", at, pace, m.s, (pt) => P.spray(pt, rng, m.spray, m.s, m.tangent, m.x, m.y, m.r));
+    else if (m.kind === "stalk") piece = P.pieceOf(this.ink, id, "bloom", at, pace, m.s, (pt) => P.stalked(pt, rng, m.s, m.tangent, m.x, m.y, m.r));
+    else if (m.kind === "hero") piece = P.pieceOf(this.ink, id, "hero", at, pace, m.s, (pt) => P.stalkedHero(pt, rng, m.s, m.x, m.y, m.r));
     else piece = P.pieceOf(this.ink, id, "bloom", at, 1, m.s, (pt) => P.bloom(pt, rng, m.x, m.y, m.r));
     this.add(piece);
   }
@@ -446,13 +455,24 @@ export class Garden implements World {
       }
     }
   }
-  // Record that the ink reaches (x, y) by tick t.
-  private inked(x: number, y: number, t: number): void {
+  // Record that the ink reaches (x, y) by tick t, running `pace` pt a tick.
+  private inked(x: number, y: number, t: number, pace: number): void {
     const nx = this.space.nx, ny = this.space.ny;
     const i0 = Math.floor(x / 3), j0 = Math.floor(y / 3);
     if (i0 < 0 || j0 < 0 || i0 >= nx || j0 >= ny) return;
     const k = j0 * nx + i0;
-    if (this.inkAt[k] === 0 || t < this.inkAt[k]) this.inkAt[k] = t;
+    if (this.inkAt[k] === 0 || t < this.inkAt[k]) {
+      this.inkAt[k] = t;
+      this.inkPace[k] = pace;
+    }
+  }
+  // The pace of the ink first reaching (x, y), pt per tick; where none has,
+  // a pt a tick.
+  private paceAt(x: number, y: number): number {
+    const i = Math.floor(x / 3), j = Math.floor(y / 3);
+    if (i < 0 || j < 0 || i >= this.space.nx || j >= this.space.ny) return 1;
+    const p = this.inkPace[j * this.space.nx + i];
+    return p > 0 ? p : 1;
   }
   // The tick the ink reaches (x, y), Infinity if it has not been laid.
   private inkTick(x: number, y: number): number {
