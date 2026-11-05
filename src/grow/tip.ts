@@ -218,14 +218,20 @@ export class Tip {
       const q = G.polar(p, b, STEP);
       return w.open(q[0], q[1]) && (this.s < ESCAPE || this.main || !w.stem(q[0], q[1]));
     };
-    // A shoot that meets something ends; a main stem turns along it.
-    const most = this.main ? 16 : 4;
+    // A shoot that meets something ends; a main stem turns along it, unless
+    // it is falling onto a floor (nothing open for a while straight below),
+    // where turning would only coil it back on itself.
+    const floor = () => {
+      for (let d = 6; d <= 60; d += 6) if (w.open(this.x, this.y - d)) return false;
+      return true;
+    };
+    const most = this.main && !(Math.sin(this.a) < -0.3 && !clear(a) && floor()) ? 16 : 0;
     while (!clear(a) && tries < most) {
       tries++;
       a = this.a + (tries % 2 === 1 ? 1 : -1) * 0.13 * Math.ceil(tries / 2);
       this.k = 0;
     }
-    if (tries >= most) return this.end(w);
+    if (tries >= most && !clear(a)) return this.end(w);
     this.a = a;
     this.x += STEP * Math.cos(a);
     this.y += STEP * Math.sin(a);

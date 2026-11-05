@@ -151,13 +151,18 @@ export class Garden implements World {
     };
     for (let i = 0; i < n; i++) {
       const r = this.rng.fork("strand:" + i);
-      const phase = (2 * Math.PI * i) / n + r.jit(0.4), wave = r.range(260, 420), amp = r.range(22, 40);
+      // Wide, slow bows, so the strands weave across each other rather than
+      // coil tight about the spine.
+      const phase = (2 * Math.PI * i) / n + r.jit(0.4), wave = r.range(520, 780), amp = r.range(50, 75);
       const a = o.heading + (i - (n - 1) / 2) * 0.35;
       const w = (o.stemWidth ?? 4.2) * (i === 0 ? 1 : r.range(0.45, 0.6));
       const tp = this.startTip(o.root[0], o.root[1], a, 0, w, Infinity, true);
       tp.twine = (y) => {
         const [mid, x0, x1] = spine(y);
-        return i === 0 ? mid : G.clamp(mid + amp * Math.sin((2 * Math.PI * (o.height - y)) / wave + phase), x0, x1);
+        // No wider than the room each side of the spine, so a bow rounds
+        // rather than runs flat along the clamp.
+        const room = Math.min(amp, Math.max(0, Math.min(mid - x0, x1 - mid) + 20));
+        return i === 0 ? mid : G.clamp(mid + room * Math.sin((2 * Math.PI * (o.height - y)) / wave + phase), x0, x1);
       };
     }
   }
