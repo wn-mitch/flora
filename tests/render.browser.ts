@@ -8,6 +8,7 @@ import { compose, leaf, Painter, Rng } from "../src/engine/index.ts";
 import { toDisplayList } from "../src/scene.ts";
 import { Timeline } from "../src/timeline.ts";
 import { meshCases } from "./mesh.browser.ts";
+import { growCases } from "./grow.browser.ts";
 
 type Px = [number, number, number, number];
 const results: { name: string; ok: boolean; msg: string }[] = [];
@@ -365,5 +366,6 @@ check("a window of a page's frames looks alike between its stretches of change",
 });
 
 meshCases(check, log);
+growCases(check, log);
 
 (window as unknown as { done: unknown }).done = { results, log };

@@ -115,6 +115,9 @@ export interface MeshDrawOptions {
   readonly y0?: number;
   // The opaque colour frames are drawn over; white when omitted.
   readonly background?: RGB;
+  // Draw over what the canvas holds, as the next of several meshes painted
+  // in turn, rather than over the background.
+  readonly keep?: boolean;
 }
 
 // A mesh on the GPU, and what of its vertices is still to be sent: each
@@ -164,7 +167,8 @@ export class MeshRenderer {
     for (const n of ["size", "off", "u", "mode"]) this.mu[n] = gl.getUniformLocation(this.maskProg, n);
   }
 
-  // Draw `mesh` at growth u over the whole canvas. Returns the time spent
+  // Draw `mesh` at growth u over the whole canvas (over what it holds,
+  // with `keep`). Returns the time spent
   // sending the mesh (on its first draw) and drawing, ms, and the calls
   // made to draw.
   draw(mesh: Mesh, u: number, o: MeshDrawOptions = {}): { send: number; draw: number; calls: number } {
@@ -198,7 +202,7 @@ export class MeshRenderer {
     gl.clearColor(bg[0], bg[1], bg[2], 1);
     gl.clearDepth(0);
     gl.clearStencil(0);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    gl.clear((o.keep === true ? 0 : gl.COLOR_BUFFER_BIT) | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.GREATER);
     gl.enable(gl.STENCIL_TEST);

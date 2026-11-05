@@ -90,13 +90,20 @@ export class Surface {
   }
 
   // Merge the layers of the tiles wholly above scene row y, where nothing
-  // more will land (Garden.settledTo), onto their dry canvases.
-  merge(y: number): void {
+  // more will land (Garden.settledTo), onto their dry canvases. (The tick
+  // is MeshSurface's, which waits for what is being laid down.)
+  merge(y: number, _tick?: number): void {
     for (const t of this.tiles) {
       if (t.layers === undefined || t.y + t.h > y) continue;
       for (const c of t.layers) if (c !== undefined) t.dry.drawImage(c.canvas, 0, 0);
       t.layers = undefined;
     }
+  }
+
+  // Whether anything waits to be drawn: never, as all is drawn at once
+  // (MeshSurface's waits on its budget).
+  pending(_tick?: number): boolean {
+    return false;
   }
 
   // How many layer canvases are held, for the playground's counters.

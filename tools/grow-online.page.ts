@@ -2,9 +2,9 @@
 // (src/grow) into a region as you watch. The region is a margin, or a
 // random walk of joined pentominoes; the main stem starts at its top,
 // heading down. ?seed, ?shape (margin | pentominoes), ?layers (fixed |
-// fixed gaps | depth | depth gaps), ?speed (ticks per frame) and ?play=0 set it up; the controls change them. window.grow
+// fixed gaps | depth | depth gaps), ?gpu=0 (Canvas2D), ?speed (ticks per frame) and ?play=0 set it up; the controls change them. window.grow
 // exposes the garden, and step(n) / show() for a runner taking pictures.
-import { Garden, Surface, type Rect } from "../src/grow/index.ts";
+import { Garden, MeshSurface, Surface, type Rect, type SurfaceOptions } from "../src/grow/index.ts";
 import { Rng } from "../src/engine/rng.ts";
 
 const q = new URLSearchParams(location.search);
@@ -75,7 +75,7 @@ layersIn.value = q.get("layers") ?? "fixed";
 speedIn.value = q.get("speed") ?? "6";
 let playing = q.get("play") !== "0";
 
-let garden: Garden, surface: Surface;
+let garden: Garden, surface: Surface | MeshSurface;
 const dpr = Math.min(2, devicePixelRatio || 1);
 let frameMs: number[] = [];
 
@@ -94,7 +94,7 @@ function start(): void {
   for (let y = 0; y < region.height; y += TILE) tiles.push({ y, h: Math.min(TILE, region.height - y) });
   const t0 = performance.now();
   garden = new Garden({ width: region.width, height: region.height, open: region.open, root: region.root, heading: -Math.PI / 2, seed: seedIn.value, depth: layersIn.value.startsWith("depth"), gaps: layersIn.value.endsWith("gaps") });
-  surface = new Surface({
+  const so: SurfaceOptions = {
     width: region.width, height: region.height, scale: dpr, tiles, paper: PAPER,
     canvas: (i, w, h) => {
       const c = document.createElement("canvas");
@@ -104,7 +104,9 @@ function start(): void {
       stage.append(c);
       return c;
     },
-  });
+  };
+  // On the GPU unless ?gpu=0.
+  surface = q.get("gpu") === "0" ? new Surface(so) : new MeshSurface(so);
   frameMs = [];
   stats.textContent = `set up in ${(performance.now() - t0).toFixed(1)} ms`;
 }
@@ -112,7 +114,7 @@ function start(): void {
 function step(n: number): void {
   garden.step(n);
   surface.lay(garden.takeFinished());
-  surface.merge(garden.settledTo);
+  surface.merge(garden.settledTo, garden.tick);
 }
 
 function show(): void {
