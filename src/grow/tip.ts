@@ -60,6 +60,11 @@ export interface World {
   // A leaf from p heading `ang`, up to `len` long, fitted to the room there
   // and claimed (engine grow.leaf), as its painter; undefined if none fits.
   leaf(p: Pt, ang: number, len: number): ((pt: Painter) => void) | undefined;
+  // The length a large leaf is asked for, pt, before it is fitted.
+  leafLength(): number;
+  // The hero, on a stalk from p heading `ang`, if it is due and has room
+  // there; claimed once given.
+  hero(p: Pt, ang: number): Make | undefined;
 }
 
 // What grows at a node or a tip's end.
@@ -130,8 +135,9 @@ export class Tip {
     return Math.max(lo, this.w0 * (1 - s / taper));
   }
 
+  // The engine's leaf spacing along its stems.
   private internode(): number {
-    return this.order === 0 ? this.rng.range(22, 38) : this.rng.range(16, 28);
+    return this.order === 0 ? this.rng.range(26, 44) : this.rng.range(20, 32);
   }
 
   // How hungry the tip is, for its share of growth: the room ahead and the
@@ -155,11 +161,11 @@ export class Tip {
     };
     const l = feel(SENSE_SIDE), c = feel(0), r = feel(-SENSE_SIDE);
     let vx = Math.cos(this.a) * 1.2, vy = Math.sin(this.a) * 1.2;
-    if (l > c * 1.05 || r > c * 1.05) {
-      const da = l > r ? SENSE_SIDE : -SENSE_SIDE;
-      vx += Math.cos(this.a + da) * 1.1;
-      vy += Math.sin(this.a + da) * 1.1;
-    }
+    // Turned toward the roomier side, as much as it is roomier.
+    const da = (SENSE_SIDE * (l - r)) / (l + r + 1);
+    const lean = this.main ? 0.6 : 1.1;
+    vx += Math.cos(this.a + da) * lean;
+    vy += Math.sin(this.a + da) * lean;
     const [px, py, n] = w.pull(this.x, this.y, this.a, 18);
     vx += px * 0.8;
     vy += py * 0.8;
@@ -196,13 +202,14 @@ export class Tip {
     }
     // The page's fall: a hanging plant runs down its margin.
     vy -= this.main ? (seeking || twining ? 0.1 : 0.45) : 0.08;
-    const wander = this.wobble(this.s / 70) * 0.5;
+    const wander = this.wobble(this.s / 90) * 0.25;
     const want = Math.atan2(vy, vx) + wander;
     // Closing in on something ahead, it bends harder.
     const urgent = G.clamp(1 - c / 16, 0, 1);
-    const kmax = (this.main ? 1 / 60 : 1 / 28) * (1 - urgent) + (1 / 14) * urgent;
+    const kmax = (this.main ? 1 / 90 : 1 / 40) * (1 - urgent) + (1 / 14) * urgent;
     const k = G.clamp((2 * Math.sin(G.turn(want, this.a))) / LOOK, -kmax, kmax);
-    this.k += G.clamp(k - this.k, -DK * STEP * (1 + 4 * urgent), DK * STEP * (1 + 4 * urgent));
+    const dk = (this.main ? DK / 2 : DK) * STEP * (1 + 6 * urgent);
+    this.k += G.clamp(k - this.k, -dk, dk);
     let a = this.a + this.k * STEP;
     // Blocked ahead: try turning away, a little more each way, else end.
     let tries = 0;
@@ -211,12 +218,14 @@ export class Tip {
       const q = G.polar(p, b, STEP);
       return w.open(q[0], q[1]) && (this.s < ESCAPE || this.main || !w.stem(q[0], q[1]));
     };
-    while (!clear(a) && tries < 10) {
+    // A shoot that meets something ends; a main stem turns along it.
+    const most = this.main ? 16 : 4;
+    while (!clear(a) && tries < most) {
       tries++;
-      a = this.a + (tries % 2 === 1 ? 1 : -1) * 0.22 * Math.ceil(tries / 2);
+      a = this.a + (tries % 2 === 1 ? 1 : -1) * 0.13 * Math.ceil(tries / 2);
       this.k = 0;
     }
-    if (tries >= 10) return this.end(w);
+    if (tries >= most) return this.end(w);
     this.a = a;
     this.x += STEP * Math.cos(a);
     this.y += STEP * Math.sin(a);
@@ -238,54 +247,46 @@ export class Tip {
     return true;
   }
 
-  // Put out a leaf, a spray or a shoot into the side with more room.
+  // Put out a leaf at the node, on alternate sides as the engine's stems
+  // do, at a large leaf's length and as large as fits; now and then a
+  // shoot, or the hero; where no leaf fits, a spray.
   private node(w: World): void {
     const p: Pt = [this.x, this.y];
     if (!w.parts(p[0], p[1])) return;
-    // The room on a side, felt beyond the stem's own claim.
-    const roomAt = (side: number) => {
-      const q = G.polar(p, this.a + (side * Math.PI) / 2, SIDE);
-      return w.parts(q[0], q[1]) ? w.room(q[0], q[1]) : 0;
-    };
-    const rl = roomAt(1), rr = roomAt(-1);
-    const side = Math.abs(rl - rr) < 4 ? -this.side : rl > rr ? 1 : -1;
-    this.side = side;
-    const room = side === 1 ? rl : rr;
     const rng = this.rng;
-    if (this.order < 2 && room > 30 && rng.chance(this.main ? 0.42 : 0.22)) {
-      const a = this.a + side * rng.range(0.6, 1.0);
-      const len = this.order === 0 ? rng.range(180, 420) : rng.range(60, 160);
-      w.node(this, this.s, { kind: "tip", x: p[0], y: p[1], a, order: this.order + 1, w: this.width(this.s) * 0.62, len });
+    const side = -this.side;
+    this.side = side;
+    const q = G.polar(p, this.a + (side * Math.PI) / 2, SIDE);
+    const room = w.parts(q[0], q[1]) ? w.room(q[0], q[1]) : 0;
+    const out = this.a + side * rng.range(0.6, 1.05);
+    if (this.main) {
+      const hero = w.hero(p, out);
+      if (hero !== undefined) {
+        w.node(this, this.s, hero);
+        return;
+      }
+    }
+    if (this.order < 2 && room > 30 && rng.chance(this.main ? 0.12 : 0.08)) {
+      const len = this.order === 0 ? rng.range(220, 480) : rng.range(80, 180);
+      w.node(this, this.s, { kind: "tip", x: p[0], y: p[1], a: out, order: this.order + 1, w: this.width(this.s) * 0.62, len });
       return;
     }
-    if (room > 22 && rng.chance(0.2)) {
-      // A bloom on a stalk of its own, kept inside the room it has.
-      const d = G.clamp(room * 0.8, 16, 36);
-      const q = G.polar(p, this.a + side * rng.range(0.7, 1.1), d);
-      const R = Math.min(20, w.room(q[0], q[1]) * 0.6);
-      if (w.parts(q[0], q[1]) && R >= 7) {
-        w.claim(q[0], q[1], R, 0.9);
-        w.node(this, this.s, { kind: "stalk", s: p, tangent: this.a, x: q[0], y: q[1], r: R });
-        return;
-      }
-    }
-    if (room > 12 && rng.chance(0.55)) {
-      const ang = this.a + side * rng.range(0.55, 1.0);
-      const paint = w.leaf(p, ang, G.clamp(room * 2.2, 22, 90) * rng.range(0.8, 1));
-      if (paint !== undefined) {
-        w.node(this, this.s, { kind: "leaf", x: p[0], y: p[1], paint });
-        return;
-      }
+    // Large leaves come in a spread of sizes, most near the middle.
+    const size = 0.35 + 0.95 * ((rng.next() + rng.next()) / 2);
+    // Leaves crowd the main stem and thin out along the shoots.
+    const paint = rng.chance(this.order === 0 ? 0.95 : 0.55) ? w.leaf(p, out, w.leafLength() * size * (this.order === 0 ? 1 : 0.7)) : undefined;
+    if (paint !== undefined) {
+      w.node(this, this.s, { kind: "leaf", x: p[0], y: p[1], paint });
+      return;
     }
     if (room > 9) {
       const d = G.clamp(room * 0.9, 14, 40);
-      const q = G.polar(p, this.a + side * rng.range(0.8, 1.2), d);
-      if (!w.parts(q[0], q[1])) return;
-      const r = G.clamp(w.room(q[0], q[1]) * 0.9, 8, 22);
-      if (w.room(q[0], q[1]) < 6) return;
+      const c = G.polar(p, this.a + side * rng.range(0.8, 1.2), d);
+      if (!w.parts(c[0], c[1]) || w.room(c[0], c[1]) < 6) return;
+      const r = G.clamp(w.room(c[0], c[1]) * 0.9, 8, 22);
       const spray = rng.weighted({ gyps: 5, cyme: 2, umbel: 1.5 }) ?? "gyps";
-      w.claim(q[0], q[1], r, 0.9);
-      w.node(this, this.s, { kind: "spray", spray, s: p, tangent: this.a, x: q[0], y: q[1], r });
+      w.claim(c[0], c[1], r, 0.9);
+      w.node(this, this.s, { kind: "spray", spray, s: p, tangent: this.a, x: c[0], y: c[1], r });
     }
   }
 

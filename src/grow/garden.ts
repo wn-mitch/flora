@@ -17,7 +17,7 @@
 //
 // Coordinates are page pt with y up from the region's foot, as the
 // engine's; pieces (pieces.ts) are in the scene's, y down from the top.
-import { CORRIDOR, grow as EG, Rng, Space, type Painter } from "../engine/index.ts";
+import { CORRIDOR, grow as EG, Rng, Space, tune, type Painter } from "../engine/index.ts";
 import type { RGB } from "../engine/color.ts";
 import * as G from "../engine/geom.ts";
 import type { Pt } from "../engine/geom.ts";
@@ -25,6 +25,7 @@ import * as P from "./pieces.ts";
 import type { Piece } from "./pieces.ts";
 import { STEP, Tip, type Make, type World } from "./tip.ts";
 import { BAND, Food } from "./food.ts";
+import { Fill } from "./fill.ts";
 
 // [x0, y0, x1, y1], page pt.
 export type Rect = readonly [number, number, number, number];
@@ -55,7 +56,7 @@ const INK = 1.6, CHUNK = 36, FIRST_CHUNK = 4;
 // The most tips growing at once.
 const MAX_TIPS = 36;
 // Pt of stem grown before a tip may end in the hero.
-const HERO_AFTER = 450;
+const HERO_AFTER = 80;
 
 interface Ink {
   // The point of the tip's stem inked up to, and the tick its pen is free.
@@ -70,10 +71,16 @@ export class Garden implements World {
   tick = 0;
   // The deepest the ink has reached, scene y.
   reach = 0;
-  hero = false;
+  // Whether the hero is placed.
+  private hero_ = false;
+  get placedHero(): boolean {
+    return this.hero_;
+  }
   private readonly space: Space;
   // The cells stems have claimed.
   private readonly stems: Uint8Array;
+  // The tick the ink reaches each cell of a stem (0: none yet).
+  private readonly inkAt: Float64Array;
   private readonly rng: Rng;
   private readonly ink: P.Ink;
   private nextId = 1;
@@ -88,6 +95,8 @@ export class Garden implements World {
   private readonly food: Food;
   private grown = 0;
   private readonly heroR: number;
+  // The region's widest open stretch, pt.
+  private readonly wide: number;
   // Stems sprouted again, the most there may be, and the food the last
   // one sought.
   private sprouts = 0;
@@ -96,6 +105,7 @@ export class Garden implements World {
   // The lowest any stem has reached, page y.
   private deepest = Infinity;
   private readonly spans = new Map<number, [number, number]>();
+  private readonly fill: Fill;
 
   constructor(o: GardenOptions) {
     this.o = o;
@@ -109,28 +119,46 @@ export class Garden implements World {
     g.field();
     this.space = g;
     this.stems = new Uint8Array(g.nx * g.ny);
-    this.food = new Food(o.width, o.height, 3, (k) => this.rng.fork("band:" + k), (x, y) => this.space.free(x, y));
+    this.inkAt = new Float64Array(g.nx * g.ny);
+    // No food hard by the region's edge, which a stem would run along.
+    this.food = new Food(o.width, o.height, 3, (k) => this.rng.fork("band:" + k), (x, y) => this.space.free(x, y) && this.room(x, y) >= 12);
     this.maxSprouts = 4 + Math.ceil(o.height / 200);
     const wide = Math.max(...o.open.map((r) => r[2] - r[0]));
-    this.heroR = G.clamp(wide * 0.22, 26, 56);
-    // The strands, each winding to and fro about the region's middle on a
-    // line of its own, out of step with the others, so they cross and
-    // recross as they run down.
+    this.wide = wide;
+    this.heroR = G.clamp(wide * 0.26, 30, 70);
+    const self = this;
+    this.fill = new Fill({
+      width: o.width, height: o.height, space: g, rng: this.rng, ink: this.ink, heroR: this.heroR,
+      get tick() { return self.tick; },
+      room: (x, y) => this.room(x, y),
+      parts: (x, y) => this.parts(x, y),
+      stem: (x, y) => this.stem(x, y),
+      inkTick: (x, y) => this.inkTick(x, y),
+      claim: (x, y, r, k) => this.claim(x, y, r, k),
+      add: (p) => this.add(p),
+      id: () => this.nextId++,
+      placed: () => { this.hero_ = true; },
+    });
+    // The strands: the main stem's spine wanders slowly down the region,
+    // and the others twine about it, each to and fro on a beat of its own,
+    // crossing it and each other as they run down.
     const n = Math.max(1, o.strands ?? 3);
     const axis = G.noise(this.rng.fork("axis"), 64);
+    const spine = (y: number) => {
+      // Kept off the region's edges.
+      const [s0, s1] = this.span(y), x0 = s0 + 30, x1 = Math.max(x0, s1 - 30);
+      return [G.clamp((x0 + x1) / 2 + ((x1 - x0) / 3) * axis((o.height - y) / 900), x0, x1), x0, x1];
+    };
     for (let i = 0; i < n; i++) {
       const r = this.rng.fork("strand:" + i);
-      const phase = (2 * Math.PI * i) / n + r.jit(0.4), wave = r.range(240, 360), amp = r.range(0.18, 0.3);
+      const phase = (2 * Math.PI * i) / n + r.jit(0.4), wave = r.range(260, 420), amp = r.range(22, 40);
       const a = o.heading + (i - (n - 1) / 2) * 0.35;
-      const w = (o.stemWidth ?? 4.2) * (i === 0 ? 1 : r.range(0.6, 0.8));
+      const w = (o.stemWidth ?? 4.2) * (i === 0 ? 1 : r.range(0.45, 0.6));
       const tp = this.startTip(o.root[0], o.root[1], a, 0, w, Infinity, true);
-      if (n > 1) {
-        tp.twine = (y) => {
-          const [x0, x1] = this.span(y);
-          const mid = (x0 + x1) / 2 + ((x1 - x0) / 5) * axis((o.height - y) / 700);
-          return mid + (x1 - x0) * amp * Math.sin((2 * Math.PI * (o.height - y)) / wave + phase);
-        };
-      }
+      tp.twine = (y) => {
+        const [mid, x0, x1] = spine(y);
+        return i === 0 ? mid : G.clamp(mid + amp * Math.sin((2 * Math.PI * (o.height - y)) / wave + phase), x0, x1);
+      };
     }
   }
 
@@ -246,6 +274,8 @@ export class Garden implements World {
       const id = this.nextId++;
       const rng = this.rng.fork("stem:" + id);
       this.add(P.pieceOf(this.ink, id, "stem", start, INK, pts[0], (pt) => P.stem(pt, rng, pts, tp.width(s0), tp.width(s1))));
+      // When the ink reaches each cell of the stretch.
+      for (let i = i0; i <= i1; i++) this.inked(tp.pts[i][0], tp.pts[i][1], start + (tp.arc[i] - s0) / INK);
       e.free = start + (s1 - tp.arc[i0]) / INK;
       e.from = i1;
       const ready = e.waiting.filter((wt) => wt.arc <= s1 + 1e-9);
@@ -272,7 +302,7 @@ export class Garden implements World {
     if (m.kind === "leaf") piece = P.pieceOf(this.ink, id, "leaf", at, 1, [m.x, m.y], m.paint);
     else if (m.kind === "spray") piece = P.pieceOf(this.ink, id, "spray", at, 1, m.s, (pt) => P.spray(pt, rng, m.spray, m.s, m.tangent, m.x, m.y, m.r));
     else if (m.kind === "stalk") piece = P.pieceOf(this.ink, id, "bloom", at, 1, m.s, (pt) => P.stalked(pt, rng, m.s, m.tangent, m.x, m.y, m.r));
-    else if (m.kind === "hero") piece = P.pieceOf(this.ink, id, "hero", at, 1, m.s, (pt) => P.hero(pt, rng, m.x, m.y, m.r));
+    else if (m.kind === "hero") piece = P.pieceOf(this.ink, id, "hero", at, 1, m.s, (pt) => P.stalkedHero(pt, rng, m.s, m.x, m.y, m.r));
     else piece = P.pieceOf(this.ink, id, "bloom", at, 1, m.s, (pt) => P.bloom(pt, rng, m.x, m.y, m.r));
     this.add(piece);
   }
@@ -307,6 +337,21 @@ export class Garden implements World {
       }
     }
   }
+  // Record that the ink reaches (x, y) by tick t.
+  private inked(x: number, y: number, t: number): void {
+    const nx = this.space.nx, ny = this.space.ny;
+    const i0 = Math.floor(x / 3), j0 = Math.floor(y / 3);
+    if (i0 < 0 || j0 < 0 || i0 >= nx || j0 >= ny) return;
+    const k = j0 * nx + i0;
+    if (this.inkAt[k] === 0 || t < this.inkAt[k]) this.inkAt[k] = t;
+  }
+  // The tick the ink reaches (x, y), Infinity if it has not been laid.
+  private inkTick(x: number, y: number): number {
+    const i = Math.floor(x / 3), j = Math.floor(y / 3);
+    if (i < 0 || j < 0 || i >= this.space.nx || j >= this.space.ny) return Infinity;
+    const t = this.inkAt[j * this.space.nx + i];
+    return t === 0 ? Infinity : t;
+  }
   stem(x: number, y: number): boolean {
     const i = Math.floor(x / 3), j = Math.floor(y / 3);
     if (i < 0 || j < 0 || i >= this.space.nx || j >= this.space.ny) return true;
@@ -320,30 +365,41 @@ export class Garden implements World {
   }
   leaf(p: Pt, ang: number, len: number): ((pt: Painter) => void) | undefined {
     if (!this.parts(p[0], p[1])) return undefined;
-    const paint = EG.leaf(this.space, this.rng.fork("leaf:" + this.nextId++), p, ang, len, 0.35, () => 1);
-    return paint;
+    // Leaves may grow across each other as far as the engine's do.
+    return EG.leaf(this.space, this.rng.fork("leaf:" + this.nextId++), p, ang, len, tune.COMPOSE.leaf_overlap, () => 1);
+  }
+  leafLength(): number {
+    return Math.min(130, this.wide * 0.85) * tune.COMPOSE.leaf_size;
+  }
+  hero(p: Pt, ang: number): Make | undefined {
+    if (this.hero_ || this.grown < HERO_AFTER) return undefined;
+    const R = this.heroR, c = G.polar(p, ang, R * 1.15);
+    if (!this.parts(c[0], c[1]) || this.room(c[0], c[1]) < R * 1.05) return undefined;
+    this.hero_ = true;
+    this.claim(c[0], c[1], R, 0.85);
+    return { kind: "hero", s: p, x: c[0], y: c[1], r: R };
   }
   node(tp: Tip, arc: number, m: Make): void {
     // The hero needs room for its petals, which reach past its radius.
-    if (m.kind === "bloom" && !this.hero && this.grown >= HERO_AFTER && this.room(m.x, m.y) >= this.heroR * 1.25) {
-      this.hero = true;
+    if (m.kind === "bloom" && !this.hero_ && this.grown >= HERO_AFTER && this.room(m.x, m.y) >= this.heroR * 1.25) {
+      this.hero_ = true;
       this.claim(m.x, m.y, this.heroR, 0.85);
       m = { kind: "hero", s: m.s, x: m.x, y: m.y, r: this.heroR };
     }
     this.inks.get(tp.id)!.waiting.push({ arc, make: m });
   }
 
-  // With no tip growing and food left, sprout a new stem from the stem
-  // point nearest it by the open cells, heading for it. A sprout that came
+  // With no tip growing and food left below the plant, sprout a new stem
+  // from the stem point nearest it by the open cells, heading for it. A sprout that came
   // to nothing takes the food it sought, so every sprout uses some up.
   private sproutAgain(): void {
     if (this.tips.length > 0 || this.queue.length > 0 || this.sprouts >= this.maxSprouts) return;
     this.food.seedTo(Infinity, this.tick);
     if (this.goal !== undefined) this.food.take(this.goal[0], this.goal[1], 50);
     const pass = (x: number, y: number) => this.open(x, y) && !this.stem(x, y);
-    // On down first, as a hanging plant grows; then whatever is left.
-    const stem = (x: number, y: number) => this.stem(x, y);
-    const s = this.food.sprout(pass, stem, 400000, this.deepest + 60) ?? this.food.sprout(pass, stem, 400000);
+    // Only on down, as a hanging plant grows: what is left above is filled
+    // with sprays as its band settles (gild).
+    const s = this.food.sprout(pass, (x, y) => this.stem(x, y), 400000, this.deepest - 20);
     this.goal = s?.goal;
     if (s === undefined) {
       this.sprouts = this.maxSprouts;
@@ -367,85 +423,8 @@ export class Garden implements World {
       if (low !== Infinity && low > y0 - 120) continue;
       if (this.queue.some((q) => q.make.y > y0 - 60 && q.make.y < y1 + 60)) continue;
       b.settled = true;
-      this.gild(k, y0, y1);
+      this.fill.gild(k, y0, y1);
     }
-    if (!this.hero && this.tips.length === 0 && this.queue.length === 0) this.lastHero();
-  }
-
-  private gild(k: number, y0: number, y1: number): void {
-    const rng = this.rng.fork("gilt:" + k);
-    const c = 6;
-    const found: [number, number, number][] = [];
-    for (let y = y0 + c / 2; y < y1; y += c) {
-      for (let x = c / 2; x < this.o.width; x += c) {
-        const r = this.room(x, y);
-        if (r < 12 || !this.parts(x, y) || !this.nearStem(x, y, 70)) continue;
-        if (r < this.room(x + c, y) || r < this.room(x - c, y) || r < this.room(x, y + c) || r < this.room(x, y - c)) continue;
-        found.push([x, y, r]);
-      }
-    }
-    found.sort((p, q) => q[2] - p[2] || q[1] - p[1] || p[0] - q[0]);
-    const chosen: [number, number][] = [];
-    const most = Math.max(1, Math.round((this.o.width * BAND) / 26000));
-    for (const [x, y, r] of found) {
-      if (chosen.length >= most) break;
-      if (chosen.some((q) => (q[0] - x) ** 2 + (q[1] - y) ** 2 < 900) || this.room(x, y) < 9) continue;
-      chosen.push([x, y]);
-      const id = this.nextId++, at = this.tick + 30 + 10 * chosen.length;
-      if (r >= 26 && rng.chance(0.3)) {
-        this.claim(x, y, 12, 1);
-        this.add(P.pieceOf(this.ink, id, "gilt", at, 1, [x, y], (pt) => P.compass(pt, x, y, 7)));
-      } else {
-        const size = Math.min(7.5, r * 0.45);
-        const kind = size >= 4.5 ? (rng.weighted({ cross: 2, rosette: 2, dotted: 1 }) ?? "cross") : (rng.weighted({ plain: 5, lozenge: 2 }) ?? "plain");
-        this.claim(x, y, size * 2.2, 1);
-        this.add(P.pieceOf(this.ink, id, "gilt", at, 1, [x, y], (pt) => P.sparkle(pt, x, y, size, kind)));
-      }
-    }
-  }
-
-  // Whether a stem passes within r of (x, y): gilt sits among what has
-  // grown, not in the open where nothing has.
-  private nearStem(x: number, y: number, r: number): boolean {
-    for (let d = 12; d <= r; d += 12) {
-      for (let k = 0; k < 16; k++) {
-        const a = (k * Math.PI) / 8;
-        if (this.space.openAt(x + d * Math.cos(a), y + d * Math.sin(a)) && this.stem(x + d * Math.cos(a), y + d * Math.sin(a))) return true;
-      }
-    }
-    return false;
-  }
-
-  // No tip ended in the hero: put it in the widest space left that a stem
-  // passes near, on a stalk from that stem.
-  private lastHero(): void {
-    this.hero = true;
-    const f = this.space.f!, c = this.space.c, nx = this.space.nx;
-    const order: number[] = [];
-    for (let i = 0; i < f.length; i++) if (f[i] >= 20) order.push(i);
-    order.sort((p, q) => f[q] - f[p] || p - q);
-    for (const i of order.slice(0, 400)) {
-      const x = (i % nx + 0.5) * c, y = (Math.floor(i / nx) + 0.5) * c;
-      if (!this.parts(x, y)) continue;
-      const r = Math.min(this.heroR, f[i] * 0.75);
-      const s = this.nearestStem(x, y, r + 60);
-      if (s === undefined) continue;
-      this.claim(x, y, r, 0.85);
-      const id = this.nextId++, rng = this.rng.fork("hero:" + id);
-      this.add(P.pieceOf(this.ink, id, "hero", this.tick + 20, 1, s, (pt) => P.stalkedHero(pt, rng, s, x, y, r)));
-      return;
-    }
-  }
-
-  // The stem point nearest (x, y) within r, by rings outward.
-  private nearestStem(x: number, y: number, r: number): Pt | undefined {
-    for (let d = 3; d <= r; d += 3) {
-      const n = Math.max(8, Math.ceil((2 * Math.PI * d) / 3));
-      for (let k = 0; k < n; k++) {
-        const a = (k * 2 * Math.PI) / n, q: Pt = [x + d * Math.cos(a), y + d * Math.sin(a)];
-        if (this.stem(q[0], q[1]) && this.space.openAt(q[0], q[1])) return q;
-      }
-    }
-    return undefined;
+    if (!this.hero_ && this.tips.length === 0 && this.queue.length === 0) this.fill.lastHero();
   }
 }

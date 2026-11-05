@@ -126,7 +126,7 @@ function loop(): void {
   }
   const sorted = [...frameMs].sort((x, y) => x - y);
   const med = sorted[sorted.length >> 1] ?? 0, p90 = sorted[Math.floor(sorted.length * 0.9)] ?? 0;
-  stats.textContent = `tick ${garden.tick} · live ${garden.live().length} · frame ${med.toFixed(1)} ms (p90 ${p90.toFixed(1)}) · ${garden.done ? "done" : playing ? "growing" : "paused"}${garden.hero ? " · hero" : ""}`;
+  stats.textContent = `tick ${garden.tick} · live ${garden.live().length} · frame ${med.toFixed(1)} ms (p90 ${p90.toFixed(1)}) · ${garden.done ? "done" : playing ? "growing" : "paused"}${garden.placedHero ? " · hero" : ""}`;
   requestAnimationFrame(loop);
 }
 
