@@ -209,11 +209,32 @@ test("with depth some leaves and sprays lie behind the stems, and nothing else c
   assert.ok(deep.every((p) => p.z !== Z.far || p.kind === "leaf" || p.kind === "spray"));
 });
 
-test("gaps change nothing that grows, and with depth each stretch of stem lifts the paper behind it", () => {
+test("gaps change nothing that grows, with depth each stretch of stem lifts the paper behind it, and stalks keep paper about them", () => {
   const o = margin(1500, 9, { depth: true });
   const bare = grow(o).pieces, gapped = grow({ ...o, gaps: true }).pieces;
   const lifts = gapped.filter((p) => p.z === Z.lift);
-  assert.equal(digest(gapped.filter((p) => p.z !== Z.lift)), digest(bare));
+  // A bloom's or spray's box takes in the paper about its stalk, and no
+  // more.
+  const stalked = (p: Piece) => p.kind === "bloom" || p.kind === "hero" || p.kind === "spray";
+  const unboxed = (ps: readonly Piece[]) => digest(ps.map((p) => (stalked(p) ? { ...p, box: [0, 0, 0, 0] as const } : p)));
+  const kept = gapped.filter((p) => p.z !== Z.lift);
+  assert.equal(unboxed(kept), unboxed(bare));
+  let stalks = 0;
+  for (let i = 0; i < bare.length; i++) {
+    const a = bare[i], b = kept[i];
+    if (!stalked(a)) continue;
+    for (let j = 0; j < 4; j++) assert.ok(Math.abs(a.box[j] - b.box[j]) <= 1.3 + 1.5, `bloom ${a.id}'s box grows ${Math.abs(a.box[j] - b.box[j]).toFixed(1)} pt`);
+    // A stalked bloom or a spray paints paper along its stalk first,
+    // under its ink.
+    const ai = a.tl.at(Infinity).items, bi = b.tl.at(Infinity).items;
+    if (bi.length === ai.length) continue;
+    stalks++;
+    const extra = bi.length - ai.length;
+    assert.ok(extra > 0, `${a.kind} ${a.id} paints less with gaps`);
+    const solid = (it: Item): boolean => (it.kind === "clip" ? it.items.every(solid) : it.kind === "fill" && it.paint.kind === "solid");
+    for (const it of bi.slice(0, extra)) assert.ok(solid(it), `${a.kind} ${a.id} paints ${it.kind} before its ink`);
+  }
+  assert.ok(stalks > 0, "no stalk has paper about it");
   const stems = new Map(gapped.filter((p) => p.kind === "stem" && p.z === Z.stem).map((p) => [p.id, p]));
   assert.equal(lifts.length, stems.size);
   for (const l of lifts) {
@@ -381,5 +402,37 @@ test("a spray runs out from its stem no faster than the stem's own ink runs ther
       assert.ok(p.rate <= pace + 1e-9, `seed ${seed}: spray ${p.id} inks ${p.rate.toFixed(2)} pt a tick, its stem ${pace.toFixed(2)}`);
     }
     assert.ok(checked > 40, `seed ${seed}: ${checked} sprays checked`);
+  }
+});
+
+// Whether point q (page pt, y up) lies inside any of piece p's painted
+// shapes, by the even-odd rule within each.
+function covers(p: Piece, h: number, q: Pt): boolean {
+  const y = h - q[1];
+  if (q[0] < p.box[0] || q[0] > p.box[2] || y < p.box[1] || y > p.box[3]) return false;
+  for (const it of p.tl.at(Infinity).items) {
+    if (it.kind === "image") continue;
+    for (const s of flatten(it.path, { scale: 1, x0: 0, y0: 0 })) {
+      let inside = false;
+      for (let i = 0, j = s.length - 2; i < s.length; j = i, i += 2) {
+        if (s[i + 1] > y !== s[j + 1] > y && q[0] < ((s[j] - s[i]) * (y - s[i + 1])) / (s[j + 1] - s[i + 1]) + s[i]) inside = !inside;
+      }
+      if (inside) return true;
+    }
+  }
+  return false;
+}
+
+test("no leaf or bloom painted over a leaf hides where it joins its stem", () => {
+  for (const seed of [1, 2, 81044420]) for (const depth of [false, true]) {
+    const W = 436, h = 2400, m = 406;
+    const { pieces } = grow({ width: W, height: h, open: [[0, 0, m, h]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed, depth, gaps: depth });
+    const order = (a: Piece, b: Piece) => a.z - b.z || a.end - b.end || a.id - b.id;
+    const leaves = pieces.filter((p) => p.kind === "leaf");
+    const over = pieces.filter((p) => p.kind === "leaf" || p.kind === "bloom" || p.kind === "hero");
+    for (const l of leaves) for (const o of over) {
+      if (o === l || order(o, l) <= 0 || Math.hypot(o.at[0] - l.at[0], o.at[1] - l.at[1]) < 1) continue;
+      assert.ok(!covers(o, h, l.at), `seed ${seed}${depth ? " depth" : ""}: ${o.kind} ${o.id} hides where leaf ${l.id} joins its stem at (${l.at.map((v) => v.toFixed(0))})`);
+    }
   }
 });

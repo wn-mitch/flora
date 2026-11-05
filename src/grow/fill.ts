@@ -23,6 +23,9 @@ export interface Host {
   readonly rng: Rng;
   readonly ink: P.Ink;
   readonly heroR: number;
+  // The paper either side of a bloom's or spray's stalk, pt, if any
+  // (Garden.stalkGap).
+  readonly stalkGap: number | undefined;
   room(x: number, y: number): number;
   parts(x: number, y: number): boolean;
   stem(x: number, y: number): boolean;
@@ -31,6 +34,11 @@ export interface Host {
   // The pace of the ink there, pt per tick: a spray from it runs at it.
   paceAt(x: number, y: number): number;
   claim(x: number, y: number, r: number, k: number): void;
+  // Put a disc there, on a stalk from s: a bloom only where it keeps off
+  // where leaves join their stems (Garden.place); whether it is put.
+  place(x: number, y: number, r: number, s: Pt | undefined, bloom: boolean): boolean;
+  // Whether a bloom there would keep off leaves' joints (Garden.place).
+  bare(x: number, y: number, r: number, s?: Pt): boolean;
   add(p: Piece): void;
   // A new component's id; and that the hero is placed.
   id(): number;
@@ -83,10 +91,16 @@ export class Fill {
       // Shrunk until all it paints lies where it may.
       for (let k = bloom ? Math.min(26, r * 0.75) : Math.min(28, r * 0.8), tries = 0; tries < 3 && k >= 6; tries++, k *= 0.7) {
         const R = k;
+        const gap = this.h.stalkGap;
+        let papers = 0;
         const piece = bloom
-          ? P.pieceOf(this.h.ink, id, "bloom", at, pace, s, (pt) => P.stalked(pt, pr.clone(), s, G.angle(s, [x, y]), x, y, R))
-          : P.pieceOf(this.h.ink, id, "spray", at, pace, s, (pt) => P.spray(pt, pr.clone(), kind, s, G.angle(s, [x, y]), x, y, R));
-        if (!this.within(piece)) continue;
+          ? P.pieceOf(this.h.ink, id, "bloom", at, pace, s, (pt) => (papers = P.stalked(pt, pr.clone(), s, G.angle(s, [x, y]), x, y, R, gap)))
+          : P.pieceOf(this.h.ink, id, "spray", at, pace, s, (pt) => (papers = P.spray(pt, pr.clone(), kind, s, G.angle(s, [x, y]), x, y, R, gap)));
+        // A bloom keeps off leaves' joints; and each is fitted by its ink
+        // alone, past the paper it paints first, so its stalks' paper
+        // changes nothing that grows.
+        if ((bloom && !this.h.bare(x, y, R * 1.2, s)) || !this.within(piece, papers)) continue;
+        this.h.place(x, y, bloom ? R * 1.2 : R, s, bloom);
         this.h.claim(x, y, R, 0.9);
         this.h.add(piece);
         break;
@@ -150,17 +164,17 @@ export class Fill {
       if (!this.h.parts(x, y)) continue;
       const r = Math.min(this.h.heroR, f[i] * 0.75);
       const s = this.nearestStem(x, y, r + 60);
-      if (s === undefined) continue;
+      if (s === undefined || !this.h.place(x, y, r * 1.25, s, true)) continue;
       this.h.claim(x, y, r, 0.85);
       const id = this.h.id(), rng = this.h.rng.fork("hero:" + id);
-      this.h.add(P.pieceOf(this.h.ink, id, "hero", this.h.tick + 20, this.h.paceAt(s[0], s[1]), s, (pt) => P.stalkedHero(pt, rng, s, x, y, r)));
+      this.h.add(P.pieceOf(this.h.ink, id, "hero", this.h.tick + 20, this.h.paceAt(s[0], s[1]), s, (pt) => P.stalkedHero(pt, rng, s, x, y, r, this.h.stalkGap)));
       return;
     }
   }
 
-  // Whether everything piece p paints lies where parts may go (a stem's
-  // half width aside).
-  private within(p: Piece): boolean {
+  // Whether everything piece p paints past its first `skip` items lies
+  // where parts may go (a stem's half width aside).
+  private within(p: Piece, skip = 0): boolean {
     const H = this.h.height;
     const ok = (x: number, y: number) => this.h.parts(x, y) || this.h.parts(x + 2.5, y) || this.h.parts(x - 2.5, y) || this.h.parts(x, y + 2.5) || this.h.parts(x, y - 2.5);
     const walk = (items: readonly Item[]): boolean => {
@@ -170,7 +184,7 @@ export class Fill {
       }
       return true;
     };
-    return walk(p.tl.at(Infinity).items);
+    return walk(p.tl.at(Infinity).items.slice(skip));
   }
 
   // Whether the way from p to q lies where parts may go.

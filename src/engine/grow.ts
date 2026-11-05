@@ -129,13 +129,17 @@ export function joint(r: Rng, p: Pt, ang: number, len: number, stem?: Joint): { 
 // otherwise it shrinks, up to three times. Returns its painter, or
 // undefined. With `stem` the leaf blends into the stem at its joint; with
 // `gap` it keeps that much clean paper outside its edge (LeafOptions.gap).
-export function leaf(g: Space, r: Rng, p: Pt, ang: number, len: number, overlap: number, factor: (kind: string) => number, stem?: Joint, gap?: number): ((this: void, pt: Painter) => void) | undefined {
+// With `clear`, a blade (and a mate's) is taken only if it also passes
+// `clear`, given its outline on the page; once it passes, it is taken.
+export function leaf(g: Space, r: Rng, p: Pt, ang: number, len: number, overlap: number, factor: (kind: string) => number, stem?: Joint, gap?: number, clear?: (this: void, outline: readonly Pt[]) => boolean): ((this: void, pt: Painter) => void) | undefined {
   const k = 1 - overlap;
   const o = L.options(r, len, ang, factor);
   const { at, base } = joint(r, p, ang, len, stem);
   for (let tries = 0; tries < 3; tries++) {
     const discs = leafDiscs(o, p, ang);
-    if (discsFit(g, discs, k) && openPath(g, G.transform(L.outline(r.clone(), o)[0], p[0], p[1], ang - PI / 2))) {
+    // The outline is costly, so made only for a blade whose discs fit.
+    const path = discsFit(g, discs, k) ? G.transform(L.outline(r.clone(), o)[0], p[0], p[1], ang - PI / 2) : undefined;
+    if (path !== undefined && openPath(g, path) && (clear === undefined || clear(path))) {
       for (const d of discs) g.disc(d[0], d[1], d[2], k);
       // Some lance leaves come in pairs, as the reference's stem leaves do:
       // a smaller one from the same node, turned aside. Its choices come
@@ -146,7 +150,8 @@ export function leaf(g: Space, r: Rng, p: Pt, ang: number, len: number, overlap:
         const ma = ang + (mr.chance(0.5) ? 1 : -1) * mr.range(0.45, 0.7);
         const mo = L.options(mr, o.len * 0.65, ma, factor);
         const md = leafDiscs(mo, p, ma);
-        if (discsFit(g, md, k) && openPath(g, G.transform(L.outline(mr.clone(), mo)[0], p[0], p[1], ma - PI / 2))) {
+        const mpath = discsFit(g, md, k) ? G.transform(L.outline(mr.clone(), mo)[0], p[0], p[1], ma - PI / 2) : undefined;
+        if (mpath !== undefined && openPath(g, mpath) && (clear === undefined || clear(mpath))) {
           for (const d of md) g.disc(d[0], d[1], d[2], k);
           mate = [ma, mo, mr];
         }

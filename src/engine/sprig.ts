@@ -16,7 +16,7 @@ import { SIZES } from "./tune.ts";
 const PI = Math.PI;
 
 // Hairline widths by class 1-3, pt.
-const WIDTHS = [0.32, 0.22, 0.14];
+export const WIDTHS = [0.32, 0.22, 0.14];
 
 interface Bud {
   readonly x: number;

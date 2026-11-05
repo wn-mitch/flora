@@ -140,27 +140,72 @@ export function bloom(pt: Painter, rng: Rng, x: number, y: number, R: number): v
   pt.lay([{ from: [x, y] }], () => F.bloom(pt, rng, x, y, R, { style: rng.weighted(w) ?? "fan" }));
 }
 
+// How far from the stem a stalk's paper gap starts, pt, so it does not
+// cut the stem the stalk leaves.
+const STALK_CLEAR = 5;
+
+// Paper `gap` either side of `line`, a pen line of half width `half`,
+// laid as its ink runs along it from `start`: under the ink, over what it
+// crosses. Its first `clear` pt are left bare, so a stalk does not cut the
+// stem it leaves. Whether any is laid.
+function lineGap(pt: Painter, line: readonly Pt[], half: number, gap: number, clear: number, start: number): boolean {
+  let s = 0, i = 1;
+  for (; i < line.length && s < clear; i++) s += G.dist(line[i - 1], line[i]);
+  const pts = line.slice(i - 1);
+  if (pts.length < 2) return false;
+  pt.lay([{ at: pts[0], along: pts, half: half + gap + 1, start: start + s }], () => pt.fill(G.smooth(G.ribbon(pts, () => half + gap), true), PAL.paper, 1));
+  return true;
+}
+
+// With `gap`, paper that far either side of batch b's pen lines but the
+// finest (and of a stalk from the root however fine), each laid as its ink
+// is (`lays`, sprayLays'): painted before the batch, so under its own ink.
+// How many are laid, each an item of its own.
+function linesGap(pt: Painter, b: S.Batch, lays: readonly Lay[], gap: number | undefined): number {
+  if (gap === undefined) return 0;
+  let n = 0;
+  // sprayLays lays the spines first, then the lines by class.
+  let i = 0;
+  for (const [pts] of b.spines) if (pts.length > 1) i++;
+  for (let c = 0; c < 3; c++) {
+    for (const pts of b.lineSpines[c]) {
+      if (pts.length < 2) continue;
+      const start = lays[i++].start ?? 0;
+      if ((c < 2 || start === 0) && lineGap(pt, pts, S.WIDTHS[c] / 2, gap, start === 0 ? STALK_CLEAR : 0, start)) n++;
+    }
+  }
+  return n;
+}
+
 // A bloom of radius R at (x, y) on a stalk from stem point s, whose stem
 // runs along `tangent`: the stalk inked first, then the bloom opening.
-export function stalked(pt: Painter, rng: Rng, s: Pt, tangent: number, x: number, y: number, R: number): void {
+// With `gap`, paper that far either side of the stalk. How many paper
+// items it paints first (linesGap).
+export function stalked(pt: Painter, rng: Rng, s: Pt, tangent: number, x: number, y: number, R: number, gap?: number): number {
   const c: Pt = [x, y];
   const stalk = G.link(s, G.depart(s, tangent, c, 0.35), c, G.angle(s, c));
   const b = new S.Batch();
   b.line(stalk, 2);
-  b.paintLaid(pt, sprayLays(b, s), PAL.ink);
+  const lays = sprayLays(b, s);
+  const papers = linesGap(pt, b, lays, gap);
+  b.paintLaid(pt, lays, PAL.ink);
   const w: Record<string, number> = {};
   for (const [k, st] of Object.entries(tune.BLOOMS)) w[k] = st.weight;
   pt.lay([{ from: c, start: G.length(stalk) }], () => F.bloom(pt, rng, x, y, R, { style: rng.weighted(w) ?? "fan" }));
+  return papers;
 }
 
 // The hero bloom, of radius R at (x, y), on a stalk from stem point s
-// when given: the stalk inked first.
-export function stalkedHero(pt: Painter, rng: Rng, s: Pt, x: number, y: number, R: number): void {
+// when given: the stalk inked first; with `gap`, paper that far either
+// side of it.
+export function stalkedHero(pt: Painter, rng: Rng, s: Pt, x: number, y: number, R: number, gap?: number): void {
   const c: Pt = [x, y];
   const stalk = G.link(s, G.angle(s, c), c, G.angle(s, c));
   const b = new S.Batch();
   b.line(stalk, 1);
-  b.paintLaid(pt, sprayLays(b, s), PAL.ink);
+  const lays = sprayLays(b, s);
+  linesGap(pt, b, lays, gap);
+  b.paintLaid(pt, lays, PAL.ink);
   pt.lay([{ from: c, start: G.length(stalk) }], () => F.hero(pt, rng, x, y, R));
 }
 
@@ -182,8 +227,10 @@ export function compass(pt: Painter, x: number, y: number, R: number): void {
 // A spray of `kind` ("gyps", "cyme" or "umbel") from stem point s, whose
 // stem runs along `tangent`, toward (x, y) with room r. Its stalk is
 // inked first and each stalk after the one it leaves; each floret, bud and
-// star opens once its stalk's ink reaches it.
-export function spray(pt: Painter, rng: Rng, kind: string, s: Pt, tangent: number, x: number, y: number, r: number): void {
+// star opens once its stalk's ink reaches it. With `gap`, paper that far
+// either side of its lines; how many paper items it paints first
+// (linesGap).
+export function spray(pt: Painter, rng: Rng, kind: string, s: Pt, tangent: number, x: number, y: number, r: number, gap?: number): number {
   const b = new S.Batch();
   const d = G.dist(s, [x, y]);
   // fill.grow's growers, but for its stalk, which this spray draws itself.
@@ -191,12 +238,16 @@ export function spray(pt: Painter, rng: Rng, kind: string, s: Pt, tangent: numbe
   const dir0 = G.depart(s, tangent, [x, y], 0.35);
   const a = chord + G.turn(chord, dir0) * 0.6;
   const base = G.polar(s, chord, Math.max(d - r * 0.55, 3));
-  b.line(G.link(s, dir0, base, a), d > 30 ? 2 : 3);
+  const stalk = G.link(s, dir0, base, a);
+  b.line(stalk, d > 30 ? 2 : 3);
   if (kind === "gyps") S.gypsophila(b, rng, base, a, r * 0.5, r >= 14 ? 5 : r >= 8 ? 4 : 3);
   else if (kind === "cyme") S.cyme(b, rng, base, a, r * 1.25, rng.chance(0.5) ? 1 : -1);
   else S.umbel(b, rng, base, a, r * 0.85);
   // Fine sprays are pen work in a diluted ink, as compose paints them.
-  b.paintLaid(pt, sprayLays(b, s), mixInk(PAL.ink, PAL.sky, 0.4));
+  const lays = sprayLays(b, s);
+  const papers = linesGap(pt, b, lays, gap);
+  b.paintLaid(pt, lays, mixInk(PAL.ink, PAL.sky, 0.4));
+  return papers;
 }
 
 // How spray batch `b`, grown from point `root`, is laid down: each line

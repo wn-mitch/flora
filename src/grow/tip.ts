@@ -29,8 +29,8 @@ const LAG = 10, GAP = 4;
 const ESCAPE = 12;
 // How far to either side of a node its room is felt, pt.
 const SIDE = 40;
-// How near a floor below a main stem ends, pt.
-const FOOT = 30;
+// How near the region's foot a stem ends, pt.
+const FOOT = 40;
 
 // What a tip asks of the garden it grows in.
 export interface World {
@@ -46,6 +46,10 @@ export interface World {
   // stem's claim also bars other stems from crossing it.
   claim(x: number, y: number, r: number, k: number): void;
   claimStem(x: number, y: number, r: number): void;
+  // Put a disc of radius r at (x, y), on a stalk from s if given: a bloom
+  // only where it keeps off where leaves join their stems; whether it is
+  // put.
+  place(x: number, y: number, r: number, s: Pt | undefined, bloom: boolean): boolean;
   // Whether a stem has claimed (x, y): tips never cross a stem, but may
   // grow under leaves and sprays.
   stem(x: number, y: number): boolean;
@@ -155,9 +159,8 @@ export class Tip {
     if (this.ended) return false;
     const p: Pt = [this.x, this.y];
     // A stem come down near the region's foot ends there, before the foot
-    // can turn it aside to run along it and snarl with the others (a side
-    // shoot, nearer, as it may grow out sideways).
-    if (this.nearFloor(w, this.main ? FOOT : FOOT / 2)) return this.end(w);
+    // can turn it aside to run along it and snarl with the others.
+    if (this.nearFloor(w, FOOT)) return this.end(w);
     // Feel ahead and to either side.
     // A strand twines over and under the others, so only side shoots shy
     // from stems.
@@ -316,6 +319,7 @@ export class Tip {
       if (!w.parts(c[0], c[1]) || w.room(c[0], c[1]) < 6) return;
       const r = G.clamp(w.room(c[0], c[1]) * 0.9, 8, 22);
       const spray = rng.weighted({ gyps: 5, cyme: 2, umbel: 1.5 }) ?? "gyps";
+      w.place(c[0], c[1], r, p, false);
       w.claim(c[0], c[1], r, 0.9);
       w.node(this, this.s, { kind: "spray", spray, s: p, tangent: this.a, x: c[0], y: c[1], r });
     }
@@ -332,7 +336,7 @@ export class Tip {
     // A bloom, centred where it has room for its petals.
     const c = G.polar(p, this.a, Math.min(14, room * 0.5));
     const R = Math.min(22, w.parts(c[0], c[1]) ? w.room(c[0], c[1]) * 0.6 : 0);
-    if (R >= 7) {
+    if (R >= 7 && w.place(c[0], c[1], R * 1.2, p, true)) {
       w.claim(c[0], c[1], R, 0.9);
       w.node(this, this.s, { kind: "bloom", s: p, x: c[0], y: c[1], r: R });
     } else if (room >= 6) {

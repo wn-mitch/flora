@@ -26,6 +26,7 @@ import type { Piece } from "./pieces.ts";
 import { STEP, Tip, type Make, type World } from "./tip.ts";
 import { BAND, Food } from "./food.ts";
 import { Fill } from "./fill.ts";
+import { Necks } from "./necks.ts";
 import { around, Weave, type Crossing } from "./weave.ts";
 
 // [x0, y0, x1, y1], page pt.
@@ -102,7 +103,17 @@ export class Garden implements World {
   get placedHero(): boolean {
     return this.hero_;
   }
+  // The paper either side of a bloom's or spray's stalk, pt: with gaps, as
+  // a stem's.
+  get stalkGap(): number | undefined {
+    return this.o.gaps === true ? OVER_GAP : undefined;
+  }
   private readonly space: Space;
+  // Where leaves join their stems, kept bare, and the owners of what is put.
+  private readonly necks: Necks;
+  private owners = 0;
+  // Each leaf's owner there, by its painter.
+  private readonly leafOwner = new WeakMap<(pt: Painter) => void, number>();
   // The cells stems have claimed.
   private readonly stems: Uint8Array;
   // The tick the ink reaches each cell of a stem (0: none yet).
@@ -151,6 +162,7 @@ export class Garden implements World {
     for (const r of o.stems ?? []) g.blockText(r[0], r[1], r[2], r[3]);
     g.field();
     this.space = g;
+    this.necks = new Necks(o.width, o.height, 3);
     this.stems = new Uint8Array(g.nx * g.ny);
     this.inkAt = new Float64Array(g.nx * g.ny);
     this.inkPace = new Float64Array(g.nx * g.ny);
@@ -162,7 +174,7 @@ export class Garden implements World {
     this.heroR = G.clamp(wide * 0.26, 30, 70);
     const self = this;
     this.fill = new Fill({
-      width: o.width, height: o.height, space: g, rng: this.rng, ink: this.ink, heroR: this.heroR,
+      width: o.width, height: o.height, space: g, rng: this.rng, ink: this.ink, heroR: this.heroR, stalkGap: this.stalkGap,
       get tick() { return self.tick; },
       room: (x, y) => this.room(x, y),
       parts: (x, y) => this.parts(x, y),
@@ -170,6 +182,8 @@ export class Garden implements World {
       inkTick: (x, y) => this.inkTick(x, y),
       paceAt: (x, y) => this.paceAt(x, y),
       claim: (x, y, r, k) => this.claim(x, y, r, k),
+      place: (x, y, r, s, bloom) => this.place(x, y, r, s, bloom),
+      bare: (x, y, r, s) => this.necks.bare(x, y, r, s),
       add: (p) => this.add(p),
       id: () => this.nextId++,
       placed: () => { this.hero_ = true; },
@@ -408,17 +422,43 @@ export class Garden implements World {
     let piece: Piece;
     // What runs out on a stalk from the stem inks it at the stem's pace
     // there, so it does not leap out ahead of the stem it grows from.
-    if (m.kind === "leaf") piece = P.pieceOf(this.ink, id, "leaf", at, 1, [m.x, m.y], m.paint);
-    else if (m.kind === "spray") piece = P.pieceOf(this.ink, id, "spray", at, pace, m.s, (pt) => P.spray(pt, rng, m.spray, m.s, m.tangent, m.x, m.y, m.r));
-    else if (m.kind === "stalk") piece = P.pieceOf(this.ink, id, "bloom", at, pace, m.s, (pt) => P.stalked(pt, rng, m.s, m.tangent, m.x, m.y, m.r));
-    else if (m.kind === "hero") piece = P.pieceOf(this.ink, id, "hero", at, pace, m.s, (pt) => P.stalkedHero(pt, rng, m.s, m.x, m.y, m.r));
+    if (m.kind === "leaf") {
+      piece = P.pieceOf(this.ink, id, "leaf", at, 1, [m.x, m.y], m.paint);
+      const owner = this.leafOwner.get(m.paint);
+      if (owner !== undefined) {
+        // Painted after the leaves over its joint, before those whose
+        // joints it lies over; dropped if it cannot be.
+        const q = this.necks.order(owner, piece, this.tick, (pid, d) => this.later(pid, d));
+        if (q === undefined) return;
+        piece = { ...piece, start: q.start, end: q.end };
+        // Behind the stems, what lies over its joint would hide it.
+        if (this.necks.hidden(owner)) return this.add(piece, false);
+      }
+    }
+    else if (m.kind === "spray") piece = P.pieceOf(this.ink, id, "spray", at, pace, m.s, (pt) => P.spray(pt, rng, m.spray, m.s, m.tangent, m.x, m.y, m.r, this.stalkGap));
+    else if (m.kind === "stalk") piece = P.pieceOf(this.ink, id, "bloom", at, pace, m.s, (pt) => P.stalked(pt, rng, m.s, m.tangent, m.x, m.y, m.r, this.stalkGap));
+    else if (m.kind === "hero") piece = P.pieceOf(this.ink, id, "hero", at, pace, m.s, (pt) => P.stalkedHero(pt, rng, m.s, m.x, m.y, m.r, this.stalkGap));
     else piece = P.pieceOf(this.ink, id, "bloom", at, 1, m.s, (pt) => P.bloom(pt, rng, m.x, m.y, m.r));
     this.add(piece);
   }
 
-  private add(p: Piece): void {
+  // Put the piece of id `id`, not yet started, d ticks later.
+  private later(id: number, d: number): void {
+    const i = this.pieces.findIndex((p) => p.id === id);
+    if (i < 0) return;
+    const [p] = this.pieces.splice(i, 1);
+    this.insert({ ...p, start: p.start + d, end: p.end + d });
+  }
+
+  // Lay down piece p; with depth, perhaps behind the stems, unless not
+  // `behind`.
+  private add(p: Piece, behind = true): void {
     // With depth, some leaves and sprays lie behind the stems.
-    if (this.o.depth === true && (p.kind === "leaf" || p.kind === "spray") && this.rng.fork("z:" + p.id).chance(p.kind === "leaf" ? FAR_LEAF : FAR_SPRAY)) p = { ...p, z: P.Z.far };
+    if (behind && this.o.depth === true && (p.kind === "leaf" || p.kind === "spray") && this.rng.fork("z:" + p.id).chance(p.kind === "leaf" ? FAR_LEAF : FAR_SPRAY)) p = { ...p, z: P.Z.far };
+    this.insert(p);
+  }
+
+  private insert(p: Piece): void {
     // Kept by start, then id, so pieces are laid down in a fixed order.
     let i = this.pieces.length;
     while (i > 0 && (this.pieces[i - 1].start > p.start || (this.pieces[i - 1].start === p.start && this.pieces[i - 1].id > p.id))) i--;
@@ -494,8 +534,26 @@ export class Garden implements World {
   }
   leaf(p: Pt, ang: number, len: number): ((pt: Painter) => void) | undefined {
     if (!this.parts(p[0], p[1])) return undefined;
-    // Leaves may grow across each other as far as the engine's do.
-    return EG.leaf(this.space, this.rng.fork("leaf:" + this.nextId++), p, ang, len, tune.COMPOSE.leaf_overlap, () => 1, undefined, this.o.gaps === true ? LEAF_GAP : undefined);
+    // Leaves may grow across each other as far as the engine's do, but
+    // not over where another joins its stem, nor where something lies over
+    // their own joint.
+    const owner = ++this.owners;
+    const clear = (outline: readonly Pt[]) => {
+      if (!this.necks.leafClear(owner, p, outline)) return false;
+      this.necks.markLeaf(owner, p, outline);
+      return true;
+    };
+    const paint = EG.leaf(this.space, this.rng.fork("leaf:" + this.nextId++), p, ang, len, tune.COMPOSE.leaf_overlap, () => 1, undefined, this.o.gaps === true ? LEAF_GAP : undefined, clear);
+    if (paint !== undefined) this.leafOwner.set(paint, owner);
+    return paint;
+  }
+  // Put a disc of radius r at (x, y), on a stalk from s if given: a bloom
+  // (painted over leaves) only where it lies over no leaf's joint; whether
+  // it is put.
+  place(x: number, y: number, r: number, s: Pt | undefined, bloom: boolean): boolean {
+    if (bloom && !this.necks.bare(x, y, r, s)) return false;
+    this.necks.markDisc(++this.owners, x, y, r, s, bloom);
+    return true;
   }
   leafLength(): number {
     return Math.min(130, this.wide * 0.85) * tune.COMPOSE.leaf_size;
@@ -503,14 +561,14 @@ export class Garden implements World {
   hero(p: Pt, ang: number): Make | undefined {
     if (this.hero_ || this.grown < HERO_AFTER) return undefined;
     const R = this.heroR, c = G.polar(p, ang, R * 1.15);
-    if (!this.parts(c[0], c[1]) || this.room(c[0], c[1]) < R * 1.05) return undefined;
+    if (!this.parts(c[0], c[1]) || this.room(c[0], c[1]) < R * 1.05 || !this.place(c[0], c[1], R * 1.25, p, true)) return undefined;
     this.hero_ = true;
     this.claim(c[0], c[1], R, 0.85);
     return { kind: "hero", s: p, x: c[0], y: c[1], r: R };
   }
   node(tp: Tip, arc: number, m: Make): void {
     // The hero needs room for its petals, which reach past its radius.
-    if (m.kind === "bloom" && !this.hero_ && this.grown >= HERO_AFTER && this.room(m.x, m.y) >= this.heroR * 1.25) {
+    if (m.kind === "bloom" && !this.hero_ && this.grown >= HERO_AFTER && this.room(m.x, m.y) >= this.heroR * 1.25 && this.place(m.x, m.y, this.heroR * 1.25, m.s, true)) {
       this.hero_ = true;
       this.claim(m.x, m.y, this.heroR, 0.85);
       m = { kind: "hero", s: m.s, x: m.x, y: m.y, r: this.heroR };
