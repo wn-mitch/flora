@@ -222,3 +222,44 @@ test("gaps change nothing that grows, and with depth each stretch of stem lifts 
   }
   assert.equal(grow({ ...margin(1500, 9), gaps: true }).pieces.filter((p) => p.z === Z.lift).length, 0);
 });
+
+// How much stem `pts` turns inside page rows y0..y1, rad per 60 pt, over
+// stretches there longer than 60 pt.
+function turning(pts: readonly Pt[], y0: number, y1: number): number {
+  let turn = 0, inside = 0;
+  for (let i = 2; i < pts.length; i++) {
+    const [a, b, c] = [pts[i - 2], pts[i - 1], pts[i]];
+    if (b[1] < y0 || b[1] > y1) continue;
+    const d = Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0]);
+    turn += Math.abs(Math.atan2(Math.sin(d), Math.cos(d)));
+    inside += Math.hypot(c[0] - b[0], c[1] - b[1]);
+  }
+  return inside > 60 ? (turn / inside) * 60 : 0;
+}
+
+test("behind a tall band where only stems run, the strands run on through it as through open margin", () => {
+  const H = 2400, band = [0, 900, 270, 1400] as const;
+  for (const seed of [1, 2, 3]) {
+    const { g } = grow(margin(H, seed, { stems: [band] }));
+    const lines = g.stemLines;
+    // None sprouts there, where nothing it put out would show.
+    assert.equal(lines.filter((l) => l[0][1] > band[1] + 3 && l[0][1] < band[3] - 3).length, 0, `seed ${seed}: stems start in the band`);
+    const through = lines.filter((l) => l.some((q) => q[1] < band[1]) && l.some((q) => q[1] > band[3]));
+    assert.ok(through.length >= 1, `seed ${seed}: no stem runs through the band`);
+    for (const l of lines) assert.ok(turning(l, band[1], band[3]) < 1.3, `seed ${seed}: a stem turns ${turning(l, band[1], band[3]).toFixed(2)} rad per 60 pt in the band`);
+    assert.ok(g.reach >= H - 40, `seed ${seed}: the ink reaches ${g.reach.toFixed(0)} of ${H}`);
+  }
+});
+
+test("gilt sits in islands, clear of every stem", () => {
+  for (const seed of [1, 2, 3]) {
+    const { g, pieces } = grow(margin(2400, seed, { depth: true, gaps: true }));
+    const gilt = pieces.filter((p) => p.kind === "gilt");
+    assert.ok(gilt.length >= 5, `seed ${seed}: ${gilt.length} gilt`);
+    for (const p of gilt) {
+      let d = Infinity;
+      for (const l of g.stemLines) for (const q of l) d = Math.min(d, Math.hypot(q[0] - p.at[0], q[1] - p.at[1]));
+      assert.ok(d >= 15, `seed ${seed}: gilt ${p.id} ${d.toFixed(1)} pt from a stem`);
+    }
+  }
+});

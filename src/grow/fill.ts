@@ -11,6 +11,9 @@ import * as P from "./pieces.ts";
 import type { Piece } from "./pieces.ts";
 import { BAND } from "./food.ts";
 
+// The clear paper kept between a gilt ornament's reach and any stem, pt.
+const ISLAND = 10;
+
 // What of the garden filling it reads and changes.
 export interface Host {
   readonly width: number;
@@ -41,12 +44,12 @@ export class Fill {
 
   // The quiet spaces of band k (page rows y0..y1) near what has grown:
   // [x, y, room], the widest first.
-  private holes(y0: number, y1: number, least: number): [number, number, number][] {
+  private holes(y0: number, y1: number, least: number, near = true): [number, number, number][] {
     const c = 6, found: [number, number, number][] = [];
     for (let y = y0 + c / 2; y < y1; y += c) {
       for (let x = c / 2; x < this.h.width; x += c) {
         const r = this.h.room(x, y);
-        if (r < least || !this.h.parts(x, y) || !this.nearStem(x, y, 90)) continue;
+        if (r < least || !this.h.parts(x, y) || (near && !this.nearStem(x, y, 90))) continue;
         if (r < this.h.room(x + c, y) || r < this.h.room(x - c, y) || r < this.h.room(x, y + c) || r < this.h.room(x, y - c)) continue;
         found.push([x, y, r]);
       }
@@ -92,12 +95,14 @@ export class Fill {
 
   private gilt(k: number, y0: number, y1: number): void {
     const rng = this.h.rng.fork("gilt:" + k);
-    const found = this.holes(y0, y1, 12);
+    // Islands: the widest quiet spaces, near what has grown or not, with no
+    // stem running by.
+    const found = this.holes(y0, y1, 12, false);
     const chosen: [number, number][] = [];
     const most = Math.max(1, Math.round((this.h.width * BAND) / 26000));
     for (const [x, y, r] of found) {
       if (chosen.length >= most) break;
-      if (chosen.some((q) => (q[0] - x) ** 2 + (q[1] - y) ** 2 < 900) || this.h.room(x, y) < 9) continue;
+      if (chosen.some((q) => (q[0] - x) ** 2 + (q[1] - y) ** 2 < 900) || this.h.room(x, y) < 9 || this.stemWithin(x, y, ISLAND + Math.min(12, r * 0.45) * 2.2)) continue;
       chosen.push([x, y]);
       const id = this.h.id(), at = this.h.tick + 30 + 10 * chosen.length;
       if (r >= 26 && rng.chance(0.3)) {
@@ -112,7 +117,13 @@ export class Fill {
     }
   }
 
-  // Whether a stem passes within r of (x, y): gilt sits among what has
+  // Whether a stem passes within r of (x, y), by its cells.
+  private stemWithin(x: number, y: number, r: number): boolean {
+    for (let dy = -r; dy <= r; dy += 3) for (let dx = -r; dx <= r; dx += 3) if (dx * dx + dy * dy <= r * r && this.h.stem(x + dx, y + dy) && this.h.space.openAt(x + dx, y + dy)) return true;
+    return false;
+  }
+
+  // Whether a stem passes within r of (x, y): a spray sits among what has
   // grown, not in the open where nothing has.
   private nearStem(x: number, y: number, r: number): boolean {
     for (let d = 12; d <= r; d += 12) {

@@ -178,7 +178,9 @@ export class Tip {
         this.goal = w.seek(this.x, this.y);
         this.seekAt = this.s + 20;
       }
-      this.lost = this.goal === undefined ? this.lost + 1 : 0;
+      // Behind what spans the margin, where only stems run, it hangs on
+      // down however far the food beyond lies.
+      this.lost = this.goal === undefined && w.parts(this.x, this.y) ? this.lost + 1 : 0;
       // No food left within reach: the stem has done its work.
       if (this.lost > 30) return this.end(w);
       if (this.goal !== undefined) {
@@ -216,7 +218,8 @@ export class Tip {
     // A new tip leaves the stem it grows from, which it may cross.
     const clear = (b: number) => {
       const q = G.polar(p, b, STEP);
-      return w.open(q[0], q[1]) && (this.s < ESCAPE || this.main || !w.stem(q[0], q[1]));
+      // Only a main stem runs on where only stems may; a shoot ends there.
+      return w.open(q[0], q[1]) && (this.main || w.parts(q[0], q[1])) && (this.s < ESCAPE || this.main || !w.stem(q[0], q[1]));
     };
     // A shoot that meets something ends; a main stem turns along it, unless
     // it is falling onto a floor (nothing open for a while straight below),

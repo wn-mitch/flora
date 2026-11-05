@@ -75,6 +75,9 @@ const LEAF_GAP = 1.1;
 // How far what grows at a point may reach from it, pt: the longest leaf,
 // with room to spare.
 const REACH = 300;
+// The room a stem feels where only stems run, pt: enough that it runs on
+// at its ease.
+const BEHIND = 40;
 
 interface Ink {
   // The point of the tip's stem inked up to, and the tick its pen is free.
@@ -125,6 +128,8 @@ export class Garden implements World {
   private readonly spans = new Map<number, [number, number]>();
   private readonly fill: Fill;
   private readonly weave = new Weave();
+  // Every tip started, in order, for the stems they have grown.
+  private readonly grownTips: Tip[] = [];
   // The scene row above which nothing more is added, kept rising.
   private settled = 0;
 
@@ -235,6 +240,12 @@ export class Garden implements World {
     return this.settled;
   }
 
+  // The lines of the stems grown so far, page pt, each from where it
+  // started, the main stems' first.
+  get stemLines(): readonly (readonly Pt[])[] {
+    return this.grownTips.map((tp) => tp.pts);
+  }
+
   // Where strands have crossed so far, and which passed over.
   get crossings(): readonly Crossing[] {
     return this.weave.crossings;
@@ -311,6 +322,7 @@ export class Garden implements World {
   private startTip(x: number, y: number, a: number, order: number, w: number, len: number, main: boolean, id = this.nextId++): Tip {
     const tp = new Tip(id, this.rng.fork("tip:" + id), x, y, a, order, w, len, main);
     this.tips.push(tp);
+    this.grownTips.push(tp);
     this.tips.sort((p, q) => p.id - q.id);
     this.inks.set(id, { from: 0, free: this.tick, waiting: [] });
     return tp;
@@ -394,6 +406,9 @@ export class Garden implements World {
 
   // World, for the tips.
   room(x: number, y: number): number {
+    // Where only stems run (behind what spans the margin) nothing else is
+    // put, so a stem steers through as through open room.
+    if (this.space.textAt(x, y)) return BEHIND;
     return Math.max(0, this.space.room(x, y));
   }
   open(x: number, y: number): boolean {
@@ -477,7 +492,8 @@ export class Garden implements World {
     const pass = (x: number, y: number) => this.open(x, y) && !this.stem(x, y);
     // Only on down, as a hanging plant grows: what is left above is filled
     // with sprays as its band settles (gild).
-    const s = this.food.sprout(pass, (x, y) => this.stem(x, y), 400000, this.deepest - 20);
+    // Not from a stem where only stems run, where nothing it puts out shows.
+    const s = this.food.sprout(pass, (x, y) => this.stem(x, y) && this.parts(x, y), 400000, this.deepest - 20);
     this.goal = s?.goal;
     if (s === undefined) {
       this.sprouts = this.maxSprouts;
@@ -487,8 +503,8 @@ export class Garden implements World {
     this.startTip(s.at[0], s.at[1], s.a, 0, 2.4, Infinity, true);
   }
 
-  // Gild each band once no tip is near it: its widest quiet spaces, from
-  // the largest down, each kept clear of the last.
+  // Gild each band once no tip is in it or above it: its widest quiet
+  // spaces, from the largest down, each kept clear of the last.
   private settle(): void {
     let low = Infinity;
     for (const tp of this.tips) low = Math.min(low, tp.y);
@@ -497,9 +513,10 @@ export class Garden implements World {
       if (b === undefined || b.settled) continue;
       const y1 = this.o.height - k * BAND, y0 = y1 - BAND;
       if (this.tick < b.at + 60) continue;
-      if (this.tips.some((tp) => tp.y > y0 - 60 && tp.y < y1 + 60)) continue;
+      // Not while a tip is in it, or above it on its way down.
+      if (this.tips.some((tp) => tp.y > y0 - 60)) continue;
       if (low !== Infinity && low > y0 - 120) continue;
-      if (this.queue.some((q) => q.make.y > y0 - 60 && q.make.y < y1 + 60)) continue;
+      if (this.queue.some((q) => q.make.y > y0 - 60)) continue;
       b.settled = true;
       this.fill.gild(k, y0, y1);
     }
