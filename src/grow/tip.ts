@@ -29,6 +29,8 @@ const LAG = 10, GAP = 4;
 const ESCAPE = 12;
 // How far to either side of a node its room is felt, pt.
 const SIDE = 40;
+// How near a floor below a main stem ends, pt.
+const FOOT = 30;
 
 // What a tip asks of the garden it grows in.
 export interface World {
@@ -152,6 +154,10 @@ export class Tip {
   step(w: World): boolean {
     if (this.ended) return false;
     const p: Pt = [this.x, this.y];
+    // A stem come down near the region's foot ends there, before the foot
+    // can turn it aside to run along it and snarl with the others (a side
+    // shoot, nearer, as it may grow out sideways).
+    if (this.nearFloor(w, this.main ? FOOT : FOOT / 2)) return this.end(w);
     // Feel ahead and to either side.
     // A strand twines over and under the others, so only side shoots shy
     // from stems.
@@ -257,6 +263,18 @@ export class Tip {
     }
     if (this.s >= this.len) return this.end(w);
     return true;
+  }
+
+  // Whether the region's foot lies straight below within d pt: a closed
+  // cell there with nothing open anywhere under it (a closed shape with
+  // margin below is turned along, not ended at).
+  private nearFloor(w: World, d: number): boolean {
+    for (let k = 6; k <= d; k += 6) {
+      if (w.open(this.x, this.y - k)) continue;
+      for (let j = k + 6; j <= this.y + 6; j += 6) if (w.open(this.x, this.y - j)) return false;
+      return true;
+    }
+    return false;
   }
 
   // Put out a leaf at the node, on alternate sides as the engine's stems

@@ -314,3 +314,18 @@ test("the strands grow down together, and each runs on past a wall it meets head
     for (const l of g.stemLines.slice(0, 3)) assert.ok(l[l.length - 1][1] < 40, `seed ${seed}: a strand ends at (${l[l.length - 1].map((v) => v.toFixed(0))})`);
   }
 });
+
+// How long stem `pts` runs below page row y, pt.
+function below(pts: readonly Pt[], y: number): number {
+  let n = 0;
+  for (let i = 1; i < pts.length; i++) if (pts[i][1] < y && pts[i - 1][1] < y) n += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  return n;
+}
+
+test("stems end as they near the foot rather than run along it", () => {
+  for (const seed of [1, 2, 3, 81044420, 81044421]) {
+    const W = 436, h = 3000, m = 406;
+    const { g } = grow({ width: W, height: h, open: [[0, 0, m, h]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed });
+    for (const l of g.stemLines) assert.ok(below(l, 40) < 45, `seed ${seed}: a stem from (${l[0].map((v) => v.toFixed(0))}) runs ${below(l, 40).toFixed(0)} pt along the foot`);
+  }
+});
