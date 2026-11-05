@@ -42,14 +42,16 @@ export interface GardenOptions {
   readonly seed: number | string;
   readonly palette?: Readonly<Record<string, unknown>>;
   readonly paper?: RGB;
-  // The main stem's width at the root, pt.
+  // The main stem's width at the root, pt, and how many strands twine
+  // down from the root together (1 for a single stem).
   readonly stemWidth?: number;
+  readonly strands?: number;
 }
 
 // Pt of growth shared among the tips each tick, and the most one takes.
 const BUDGET = 2.2, MAX_SHARE = 1.6;
 // Pt of stem each stem's pen inks per tick, and the stretch inked at once.
-const INK = 1.6, CHUNK = 36, FIRST_CHUNK = 8;
+const INK = 1.6, CHUNK = 36, FIRST_CHUNK = 4;
 // The most tips growing at once.
 const MAX_TIPS = 36;
 // Pt of stem grown before a tip may end in the hero.
@@ -93,6 +95,7 @@ export class Garden implements World {
   private goal: Pt | undefined;
   // The lowest any stem has reached, page y.
   private deepest = Infinity;
+  private readonly spans = new Map<number, [number, number]>();
 
   constructor(o: GardenOptions) {
     this.o = o;
@@ -110,7 +113,43 @@ export class Garden implements World {
     this.maxSprouts = 4 + Math.ceil(o.height / 200);
     const wide = Math.max(...o.open.map((r) => r[2] - r[0]));
     this.heroR = G.clamp(wide * 0.22, 26, 56);
-    this.startTip(o.root[0], o.root[1], o.heading, 0, o.stemWidth ?? 4.2, Infinity, true);
+    // The strands, each winding to and fro about the region's middle on a
+    // line of its own, out of step with the others, so they cross and
+    // recross as they run down.
+    const n = Math.max(1, o.strands ?? 3);
+    const axis = G.noise(this.rng.fork("axis"), 64);
+    for (let i = 0; i < n; i++) {
+      const r = this.rng.fork("strand:" + i);
+      const phase = (2 * Math.PI * i) / n + r.jit(0.4), wave = r.range(240, 360), amp = r.range(0.18, 0.3);
+      const a = o.heading + (i - (n - 1) / 2) * 0.35;
+      const w = (o.stemWidth ?? 4.2) * (i === 0 ? 1 : r.range(0.6, 0.8));
+      const tp = this.startTip(o.root[0], o.root[1], a, 0, w, Infinity, true);
+      if (n > 1) {
+        tp.twine = (y) => {
+          const [x0, x1] = this.span(y);
+          const mid = (x0 + x1) / 2 + ((x1 - x0) / 5) * axis((o.height - y) / 700);
+          return mid + (x1 - x0) * amp * Math.sin((2 * Math.PI * (o.height - y)) / wave + phase);
+        };
+      }
+    }
+  }
+
+  // The open stretch of page row y: its leftmost and rightmost open x.
+  private span(y: number): [number, number] {
+    const j = Math.floor(y / 3);
+    const got = this.spans.get(j);
+    if (got !== undefined) return got;
+    let x0 = Infinity, x1 = -Infinity;
+    for (let i = 0; i < this.space.nx; i++) {
+      const x = (i + 0.5) * 3;
+      if (this.space.openAt(x, y) || this.space.textAt(x, y)) {
+        x0 = Math.min(x0, x);
+        x1 = Math.max(x1, x);
+      }
+    }
+    const s: [number, number] = x0 <= x1 ? [x0, x1] : [0, this.o.width];
+    this.spans.set(j, s);
+    return s;
   }
 
   // Whether nothing more will grow or be laid down.
@@ -166,7 +205,7 @@ export class Garden implements World {
     const ended = this.tips.filter((tp) => tp.ended);
     if (ended.length > 0) {
       this.tips = this.tips.filter((tp) => !tp.ended);
-      if (ended.some((tp) => tp.main) && this.tips.length > 0) {
+      if (ended.some((tp) => tp.main) && this.tips.length > 0 && !this.tips.some((tp) => tp.main)) {
         // The lowest tip carries the plant on down.
         let low = this.tips[0];
         for (const tp of this.tips) if (tp.y < low.y) low = tp;
@@ -185,11 +224,12 @@ export class Garden implements World {
     this.pieces = still;
   }
 
-  private startTip(x: number, y: number, a: number, order: number, w: number, len: number, main: boolean, id = this.nextId++): void {
+  private startTip(x: number, y: number, a: number, order: number, w: number, len: number, main: boolean, id = this.nextId++): Tip {
     const tp = new Tip(id, this.rng.fork("tip:" + id), x, y, a, order, w, len, main);
     this.tips.push(tp);
     this.tips.sort((p, q) => p.id - q.id);
     this.inks.set(id, { from: 0, free: this.tick, waiting: [] });
+    return tp;
   }
 
   // Ink tip tp's stem up to its tip, a stretch at a time (all that is left

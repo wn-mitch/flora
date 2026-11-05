@@ -99,6 +99,10 @@ export class Tip {
   // Where it last sought food, and the arc it seeks again at.
   private goal: Pt | undefined;
   private seekAt = 0;
+  // For a strand twined with others: the x it winds toward at page y.
+  twine: ((y: number) => number) | undefined;
+  // Steps since a main stem last had food near or a way to some.
+  private lost = 0;
 
   constructor(id: number, rng: Rng, x: number, y: number, a: number, order: number, w0: number, len: number, main: boolean) {
     this.id = id;
@@ -143,9 +147,11 @@ export class Tip {
     if (this.ended) return false;
     const p: Pt = [this.x, this.y];
     // Feel ahead and to either side.
+    // A strand twines over and under the others, so only side shoots shy
+    // from stems.
     const feel = (da: number) => {
       const q = G.polar(p, this.a + da, SENSE_AT);
-      return w.stem(q[0], q[1]) ? 0 : w.room(q[0], q[1]);
+      return !this.main && w.stem(q[0], q[1]) ? 0 : w.room(q[0], q[1]);
     };
     const l = feel(SENSE_SIDE), c = feel(0), r = feel(-SENSE_SIDE);
     let vx = Math.cos(this.a) * 1.2, vy = Math.sin(this.a) * 1.2;
@@ -160,11 +166,15 @@ export class Tip {
     // With nothing near to draw it, the main stem seeks the nearest food by
     // the open cells, every so often.
     let seeking = false;
+    if (n > 0) this.lost = 0;
     if (n === 0 && this.main) {
       if (this.s >= this.seekAt) {
         this.goal = w.seek(this.x, this.y);
         this.seekAt = this.s + 20;
       }
+      this.lost = this.goal === undefined ? this.lost + 1 : 0;
+      // No food left within reach: the stem has done its work.
+      if (this.lost > 30) return this.end(w);
       if (this.goal !== undefined) {
         const d = Math.max(1, G.dist(p, this.goal));
         vx += ((this.goal[0] - this.x) / d) * 1.4;
@@ -172,8 +182,20 @@ export class Tip {
         seeking = true;
       }
     }
+    // A twined strand winds toward its own line down the margin, crossing
+    // the others' as it goes.
+    let twining = false;
+    if (this.main && !seeking && this.twine !== undefined) {
+      const gy = this.y - 30, gx = this.twine(gy);
+      if (w.open(gx, gy)) {
+        const d = Math.hypot(gx - this.x, gy - this.y);
+        vx += ((gx - this.x) / d) * 1.6;
+        vy += ((gy - this.y) / d) * 1.6;
+        twining = true;
+      }
+    }
     // The page's fall: a hanging plant runs down its margin.
-    vy -= this.main ? (seeking ? 0.1 : 0.45) : 0.08;
+    vy -= this.main ? (seeking || twining ? 0.1 : 0.45) : 0.08;
     const wander = this.wobble(this.s / 70) * 0.5;
     const want = Math.atan2(vy, vx) + wander;
     // Closing in on something ahead, it bends harder.
@@ -187,7 +209,7 @@ export class Tip {
     // A new tip leaves the stem it grows from, which it may cross.
     const clear = (b: number) => {
       const q = G.polar(p, b, STEP);
-      return w.open(q[0], q[1]) && (this.s < ESCAPE || !w.stem(q[0], q[1]));
+      return w.open(q[0], q[1]) && (this.s < ESCAPE || this.main || !w.stem(q[0], q[1]));
     };
     while (!clear(a) && tries < 10) {
       tries++;
