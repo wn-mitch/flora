@@ -17,7 +17,7 @@ import { parseArgs } from "node:util";
 const { values: o } = parseArgs({
   options: {
     port: { type: "string", default: "5180" }, shots: { type: "string" }, every: { type: "string", default: "150" },
-    seed: { type: "string", default: "7" }, shape: { type: "string", default: "pentominoes" },
+    seed: { type: "string", default: "7" }, shape: { type: "string", default: "pentominoes" }, layers: { type: "string", default: "fixed" },
   },
 });
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
@@ -26,6 +26,7 @@ await build({ entryPoints: [join(root, "tools", "grow-online.page.ts")], bundle:
 const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>flora online</title>
 <style>body{margin:0;background:#f9f8f4;font:13px ui-sans-serif,system-ui;color:#333}#bar{position:sticky;top:0;z-index:2;background:#f9f8f4e8;padding:8px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #0001}#stage{position:relative;margin:16px}input{width:5em}</style>
 <div id="bar">seed <input id="seed"> shape <select id="shape"><option>pentominoes</option><option>margin</option></select>
+layers <select id="layers"><option>fixed</option><option>depth</option></select>
 ticks/frame <input id="speed" type="number" min="1" max="200"> <button id="play"></button> <button id="again">regrow</button> <span id="stats"></span></div>
 <div id="stage"></div><script type="module" src="/grow.js"></script>`;
 const server = createServer(async (req, res) => {
@@ -49,7 +50,7 @@ if (o.shots === undefined) {
     const p = await browser.newPage({ viewport: { width: 420, height: 900 }, deviceScaleFactor: 2 });
     const errors = [];
     p.on("pageerror", (e) => errors.push(String(e)));
-    await p.goto(`${url}?${new URLSearchParams({ seed: o.seed, shape: o.shape, play: "0" })}`);
+    await p.goto(`${url}?${new URLSearchParams({ seed: o.seed, shape: o.shape, layers: o.layers, play: "0" })}`);
     await p.waitForFunction(() => window.grow, null, { timeout: 30000 });
     for (let i = 1; i <= Number(o.shots); i++) {
       const ms = await p.evaluate((n) => { const a = performance.now(); window.grow.step(n); window.grow.show(); return performance.now() - a; }, Number(o.every));

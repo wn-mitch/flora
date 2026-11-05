@@ -4,10 +4,13 @@
 // starts before the ink of the stem it grows from reaches it, and no
 // floret before its stalk's; one hero per garden; growth settles, reaches
 // the foot of a tall region and fills it down its length; and the first
-// stroke shows within a few ticks.
+// stroke shows within a few ticks. Nothing is added above the row a
+// garden calls settled; crossing strands take turns passing over; and
+// putting some leaves and sprays behind the stems changes only their
+// layers, not what grows.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Garden, type GardenOptions, type Piece } from "../src/grow/index.ts";
+import { Garden, Z, type GardenOptions, type Piece } from "../src/grow/index.ts";
 import { sprayLays } from "../src/grow/pieces.ts";
 import { sprig as S, Rng } from "../src/engine/index.ts";
 import type { Pt } from "../src/engine/geom.ts";
@@ -146,4 +149,62 @@ test("the first stroke shows within a few ticks, however tall the region", () =>
     assert.ok(tick <= 8, `${H} pt: first stroke at tick ${tick}`);
     assert.ok(ms < 150, `${H} pt: ${ms.toFixed(0)} ms to the first stroke`);
   }
+});
+
+test("nothing is added above the row a garden calls settled, which falls well before it is done", () => {
+  const H = 2400;
+  for (const seed of [1, 2]) {
+    const g = new Garden(margin(H, seed, { closed: [[60, 1500, 270, 1700]], stems: [[0, 900, 270, 960]] }));
+    const seen = new Set<number>();
+    let halfway = Infinity;
+    while (!g.done && g.tick < 60000) {
+      const s = g.settledTo;
+      if (s >= H / 2 && halfway === Infinity) halfway = g.tick;
+      g.step(1);
+      for (const p of [...g.live(), ...g.takeFinished()]) {
+        if (seen.has(p.id)) continue;
+        seen.add(p.id);
+        assert.ok(s <= 0 || p.box[1] >= s, `seed ${seed}: ${p.kind} ${p.id} added at tick ${g.tick} reaches row ${p.box[1].toFixed(1)}, above the settled ${s.toFixed(1)}`);
+      }
+    }
+    assert.equal(g.settledTo, Infinity);
+    // Tiles above settle and let go of their layers while it still grows.
+    assert.ok(halfway < g.tick * 0.8, `seed ${seed}: half settled only at tick ${halfway} of ${g.tick}`);
+  }
+});
+
+test("crossing strands take turns passing over, each crossing inked over once both inks reach it", () => {
+  const H = 2400;
+  for (const seed of [3, 4]) {
+    const o = margin(H, seed);
+    const { g, pieces } = grow(o);
+    const cs = g.crossings;
+    assert.ok(cs.length >= 6, `seed ${seed}: ${cs.length} crossings`);
+    const turns = new Map<string, number[]>();
+    for (const c of cs) {
+      // None where the strands leave the root together.
+      assert.ok(Math.hypot(c.at[0] - o.root[0], c.at[1] - o.root[1]) > 15, `seed ${seed}: a crossing at the root`);
+      if (c.over.id === c.under.id) continue;
+      const k = [c.over.id, c.under.id].sort((a, b) => a - b).join(":");
+      turns.set(k, [...(turns.get(k) ?? []), c.over.id]);
+      const over = pieces.filter((p) => p.z === Z.over && Math.hypot(p.at[0] - c.at[0], p.at[1] - c.at[1]) < 1e-6);
+      assert.equal(over.length, 1, `seed ${seed}: crossing at ${c.at.map((v) => v.toFixed(1))} inked over ${over.length} times`);
+      assert.ok(over[0].start >= c.t, `seed ${seed}: inked over at ${over[0].start}, before both inks reach it at ${c.t.toFixed(1)}`);
+    }
+    for (const [k, ids] of turns) for (let i = 1; i < ids.length; i++) assert.notEqual(ids[i], ids[i - 1], `seed ${seed}: strands ${k} pass over ${ids.join(",")}`);
+    assert.equal(grow({ ...o, weave: false }).pieces.filter((p) => p.z === Z.over).length, 0);
+  }
+});
+
+test("with depth some leaves and sprays lie behind the stems, and nothing else changes", () => {
+  const o = margin(1800, 8);
+  const flat = grow(o).pieces, deep = grow({ ...o, depth: true }).pieces;
+  assert.equal(digest(deep), digest(flat));
+  const want: Record<string, number> = { leaf: Z.leaf, spray: Z.spray, bloom: Z.bloom, hero: Z.bloom, gilt: Z.bloom };
+  for (const p of flat) assert.ok(p.kind === "stem" ? p.z === Z.stem || p.z === Z.over : p.z === want[p.kind], `${p.kind} ${p.id} in layer ${p.z}`);
+  for (const kind of ["leaf", "spray"]) {
+    const all = deep.filter((p) => p.kind === kind), far = all.filter((p) => p.z === Z.far);
+    assert.ok(far.length > 0 && far.length < all.length, `${far.length} of ${all.length} ${kind}s behind`);
+  }
+  assert.ok(deep.every((p) => p.z !== Z.far || p.kind === "leaf" || p.kind === "spray"));
 });

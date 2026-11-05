@@ -29,6 +29,24 @@ export interface Piece {
   // Where it grows from, page pt (y up): its stem's start, a leaf's or
   // spray's base, a bloom's centre.
   readonly at: Pt;
+  // The layer it is painted in (Z), back to front.
+  readonly z: number;
+}
+
+// The layers pieces are painted in, back to front, as the engine paints a
+// page (compose.ts): what lies behind the stems, the stems, where one
+// strand passes over another, the sprays, the leaves, and the blooms with
+// the hero and gilt over all. Within a layer, pieces lie in the order
+// they are laid down.
+export const Z = { far: 0, stem: 1, over: 2, spray: 3, leaf: 4, bloom: 5 } as const;
+export const LAYERS = 6;
+
+// The layer a piece of `kind` is painted in, unless put elsewhere.
+export function zOf(kind: string): number {
+  if (kind === "stem") return Z.stem;
+  if (kind === "spray") return Z.spray;
+  if (kind === "leaf") return Z.leaf;
+  return Z.bloom;
 }
 
 // What every piece of one garden is painted with.
@@ -46,13 +64,13 @@ export function frameOf(p: Piece, t: number): DisplayList {
 }
 
 // Piece `id` of `kind`, painted by `paint` on a painter of its own and
-// starting at tick `start`; its growth runs `rate` per tick.
-export function pieceOf(ink: Ink, id: number, kind: string, start: number, rate: number, at: Pt, paint: (pt: Painter) => void): Piece {
+// starting at tick `start`, in layer z; its growth runs `rate` per tick.
+export function pieceOf(ink: Ink, id: number, kind: string, start: number, rate: number, at: Pt, paint: (pt: Painter) => void, z = zOf(kind)): Piece {
   const pt = new Painter({ width: ink.width, height: ink.height, timed: true, paper: ink.paper, palette: ink.palette as never });
   paint(pt);
   const tl = new Timeline(pt.scene());
   const box = boxOf(tl.at(Infinity).items);
-  return { id, kind, start, rate, end: start + Math.ceil(tl.end / rate), tl, box, at };
+  return { id, kind, start, rate, end: start + Math.ceil(tl.end / rate), tl, box, at, z };
 }
 
 // What `items` paint, within the clips they are painted in.
@@ -90,6 +108,15 @@ export function stem(pt: Painter, rng: Rng, pts: readonly Pt[], w0: number, w1: 
   const b = new S.Batch();
   b.stem(pts, w0, w1);
   b.paintLaid(pt, b.lays(), PAL.ink);
+}
+
+// A strand passing over another along `pts`, `w` wide: the paper knocked
+// out a little wider than it, so a gap shows either side where the strand
+// under it runs, then the strand inked again over the gap.
+export function over(pt: Painter, rng: Rng, pts: readonly Pt[], w: number, gap: number): void {
+  if (pts.length < 2) return;
+  pt.lay([{ at: pts[0], along: pts, half: w / 2 + gap + 1 }], () => pt.fill(G.smooth(G.ribbon(pts, () => w / 2 + gap), true), PAL.paper, 1));
+  stem(pt, rng, pts, w, w);
 }
 
 // A leaf whose base sits at (x, y), heading `ang`, up to `len` long.

@@ -1,8 +1,8 @@
 // Runs in the browser (tools/grow-online.mjs): a garden grown online
 // (src/grow) into a region as you watch. The region is a margin, or a
 // random walk of joined pentominoes; the main stem starts at its top,
-// heading down. ?seed, ?shape (margin | pentominoes), ?speed (ticks per
-// frame) and ?play=0 set it up; the controls change them. window.grow
+// heading down. ?seed, ?shape (margin | pentominoes), ?layers (fixed |
+// depth), ?speed (ticks per frame) and ?play=0 set it up; the controls change them. window.grow
 // exposes the garden, and step(n) / show() for a runner taking pictures.
 import { Garden, Surface, type Rect } from "../src/grow/index.ts";
 import { Rng } from "../src/engine/rng.ts";
@@ -66,10 +66,12 @@ const stage = document.getElementById("stage")!;
 const stats = document.getElementById("stats")!;
 const seedIn = document.getElementById("seed") as HTMLInputElement;
 const shapeIn = document.getElementById("shape") as HTMLSelectElement;
+const layersIn = document.getElementById("layers") as HTMLSelectElement;
 const speedIn = document.getElementById("speed") as HTMLInputElement;
 const playIn = document.getElementById("play") as HTMLButtonElement;
 seedIn.value = q.get("seed") ?? "7";
 shapeIn.value = q.get("shape") ?? "pentominoes";
+layersIn.value = q.get("layers") ?? "fixed";
 speedIn.value = q.get("speed") ?? "6";
 let playing = q.get("play") !== "0";
 
@@ -91,7 +93,7 @@ function start(): void {
   const tiles: { y: number; h: number }[] = [];
   for (let y = 0; y < region.height; y += TILE) tiles.push({ y, h: Math.min(TILE, region.height - y) });
   const t0 = performance.now();
-  garden = new Garden({ width: region.width, height: region.height, open: region.open, root: region.root, heading: -Math.PI / 2, seed: seedIn.value });
+  garden = new Garden({ width: region.width, height: region.height, open: region.open, root: region.root, heading: -Math.PI / 2, seed: seedIn.value, depth: layersIn.value === "depth" });
   surface = new Surface({
     width: region.width, height: region.height, scale: dpr, tiles, paper: PAPER,
     canvas: (i, w, h) => {
@@ -110,6 +112,7 @@ function start(): void {
 function step(n: number): void {
   garden.step(n);
   surface.lay(garden.takeFinished());
+  surface.merge(garden.settledTo);
 }
 
 function show(): void {
@@ -126,7 +129,7 @@ function loop(): void {
   }
   const sorted = [...frameMs].sort((x, y) => x - y);
   const med = sorted[sorted.length >> 1] ?? 0, p90 = sorted[Math.floor(sorted.length * 0.9)] ?? 0;
-  stats.textContent = `tick ${garden.tick} · live ${garden.live().length} · frame ${med.toFixed(1)} ms (p90 ${p90.toFixed(1)}) · ${garden.done ? "done" : playing ? "growing" : "paused"}${garden.placedHero ? " · hero" : ""}`;
+  stats.textContent = `tick ${garden.tick} · live ${garden.live().length} · frame ${med.toFixed(1)} ms (p90 ${p90.toFixed(1)}) · ${garden.done ? "done" : playing ? "growing" : "paused"}${garden.placedHero ? " · hero" : ""} · ${surface.held} layers held`;
   requestAnimationFrame(loop);
 }
 
@@ -135,6 +138,7 @@ playIn.textContent = playing ? "pause" : "play";
 (document.getElementById("again") as HTMLButtonElement).onclick = start;
 seedIn.onchange = start;
 shapeIn.onchange = start;
+layersIn.onchange = start;
 start();
 requestAnimationFrame(loop);
 

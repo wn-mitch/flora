@@ -26,6 +26,7 @@ import type { Piece } from "./pieces.ts";
 import { STEP, Tip, type Make, type World } from "./tip.ts";
 import { BAND, Food } from "./food.ts";
 import { Fill } from "./fill.ts";
+import { around, Weave, type Crossing } from "./weave.ts";
 
 // [x0, y0, x1, y1], page pt.
 export type Rect = readonly [number, number, number, number];
@@ -47,6 +48,11 @@ export interface GardenOptions {
   // down from the root together (1 for a single stem).
   readonly stemWidth?: number;
   readonly strands?: number;
+  // Whether crossing strands take turns over and under (on by default),
+  // and whether leaves and sprays lie some in front of the stems and some
+  // behind (off: all in front, as the engine paints a page).
+  readonly weave?: boolean;
+  readonly depth?: boolean;
 }
 
 // Pt of growth shared among the tips each tick, and the most one takes.
@@ -57,6 +63,12 @@ const INK = 1.6, CHUNK = 36, FIRST_CHUNK = 4;
 const MAX_TIPS = 36;
 // Pt of stem grown before a tip may end in the hero.
 const HERO_AFTER = 80;
+// The paper either side of a strand passing over another, pt; and the
+// share of leaves and of sprays put behind the stems, with depth.
+const OVER_GAP = 1.3, FAR_LEAF = 0.35, FAR_SPRAY = 0.5;
+// How far what grows at a point may reach from it, pt: the longest leaf,
+// with room to spare.
+const REACH = 300;
 
 interface Ink {
   // The point of the tip's stem inked up to, and the tick its pen is free.
@@ -106,6 +118,9 @@ export class Garden implements World {
   private deepest = Infinity;
   private readonly spans = new Map<number, [number, number]>();
   private readonly fill: Fill;
+  private readonly weave = new Weave();
+  // The scene row above which nothing more is added, kept rising.
+  private settled = 0;
 
   constructor(o: GardenOptions) {
     this.o = o;
@@ -190,6 +205,35 @@ export class Garden implements World {
     return this.tips.length === 0 && this.queue.length === 0 && this.pieces.length === 0;
   }
 
+  // The scene row (y down) above which nothing more will be added: no tip
+  // or what waits on one within reach of it, no band left to fill, no
+  // piece still to be laid down. It only rises.
+  get settledTo(): number {
+    if (this.done) return Infinity;
+    const H = this.o.height;
+    // The hero, until placed, may go anywhere.
+    let s = this.hero_ ? Infinity : 0;
+    for (const tp of this.tips) s = Math.min(s, H - tp.y - REACH);
+    for (const q of this.queue) s = Math.min(s, H - q.make.y - REACH);
+    for (const p of this.pieces) s = Math.min(s, p.box[1]);
+    for (let k = 0; k < this.food.bands.length; k++) {
+      const b = this.food.bands[k];
+      if (b !== undefined && !b.settled) {
+        s = Math.min(s, k * BAND - 120);
+        break;
+      }
+    }
+    // With no tip growing the plant may sprout again from its stems.
+    if (this.tips.length === 0 && this.sprouts < this.maxSprouts) s = Math.min(s, H - this.deepest - 2 * REACH);
+    this.settled = Math.max(this.settled, s);
+    return this.settled;
+  }
+
+  // Where strands have crossed so far, and which passed over.
+  get crossings(): readonly Crossing[] {
+    return this.weave.crossings;
+  }
+
   // The pieces being laid down at this tick, by start.
   live(): Piece[] {
     return this.pieces.filter((p) => p.start <= this.tick);
@@ -223,7 +267,8 @@ export class Garden implements World {
     for (let i = 0; i < this.tips.length; i++) {
       const tp = this.tips[i];
       let share = sum > 0 ? Math.min(MAX_SHARE, (BUDGET * want[i]) / sum) : 0.4;
-      if (tp.main) share = Math.max(share, 0.5);
+      // A side shoot too, so none lingers far behind the front.
+      share = Math.max(share, tp.main ? 0.5 : 0.6);
       tp.starved = share < 0.15 ? tp.starved + 1 : 0;
       if (tp.starved > 150) tp.end(this);
       tp.credit += share;
@@ -281,6 +326,7 @@ export class Garden implements World {
       this.add(P.pieceOf(this.ink, id, "stem", start, INK, pts[0], (pt) => P.stem(pt, rng, pts, tp.width(s0), tp.width(s1))));
       // When the ink reaches each cell of the stretch.
       for (let i = i0; i <= i1; i++) this.inked(tp.pts[i][0], tp.pts[i][1], start + (tp.arc[i] - s0) / INK);
+      if (tp.order === 0 && this.o.weave !== false) this.over(tp, i0, i1, (i) => start + (tp.arc[i] - s0) / INK);
       e.free = start + (s1 - tp.arc[i0]) / INK;
       e.from = i1;
       const ready = e.waiting.filter((wt) => wt.arc <= s1 + 1e-9);
@@ -290,6 +336,19 @@ export class Garden implements World {
     if (last) {
       for (const wt of e.waiting) this.make(Math.ceil(e.free), wt.make);
       e.waiting = [];
+    }
+  }
+
+  // Where strand tp's segments i0..i1 - 1 cross the strands inked before
+  // them, ink again over the gap whichever passes over.
+  private over(tp: Tip, i0: number, i1: number, ink: (i: number) => number): void {
+    for (const c of this.weave.ink(tp, i0, i1, ink)) {
+      const top = c.over as Tip, under = c.under as Tip;
+      const wo = top.width(c.s), wu = under.width(c.su);
+      const half = (wu / 2 + OVER_GAP) / Math.max(0.35, Math.sin(c.angle)) + wo / 2 + 1;
+      const pts = around(top, c.s, half);
+      const id = this.nextId++, rng = this.rng.fork("over:" + id);
+      this.add(P.pieceOf(this.ink, id, "stem", Math.ceil(c.t) + 1, INK, c.at, (pt) => P.over(pt, rng, pts, wo, OVER_GAP), P.Z.over));
     }
   }
 
@@ -313,6 +372,8 @@ export class Garden implements World {
   }
 
   private add(p: Piece): void {
+    // With depth, some leaves and sprays lie behind the stems.
+    if (this.o.depth === true && (p.kind === "leaf" || p.kind === "spray") && this.rng.fork("z:" + p.id).chance(p.kind === "leaf" ? FAR_LEAF : FAR_SPRAY)) p = { ...p, z: P.Z.far };
     // Kept by start, then id, so pieces are laid down in a fixed order.
     let i = this.pieces.length;
     while (i > 0 && (this.pieces[i - 1].start > p.start || (this.pieces[i - 1].start === p.start && this.pieces[i - 1].id > p.id))) i--;
