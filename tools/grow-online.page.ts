@@ -2,7 +2,7 @@
 // (src/grow) into a region as you watch. The region is a margin, or a
 // random walk of joined pentominoes; the main stem starts at its top,
 // heading down. ?seed, ?shape (margin | pentominoes), ?layers (fixed |
-// depth), ?speed (ticks per frame) and ?play=0 set it up; the controls change them. window.grow
+// fixed gaps | depth | depth gaps), ?speed (ticks per frame) and ?play=0 set it up; the controls change them. window.grow
 // exposes the garden, and step(n) / show() for a runner taking pictures.
 import { Garden, Surface, type Rect } from "../src/grow/index.ts";
 import { Rng } from "../src/engine/rng.ts";
@@ -93,7 +93,7 @@ function start(): void {
   const tiles: { y: number; h: number }[] = [];
   for (let y = 0; y < region.height; y += TILE) tiles.push({ y, h: Math.min(TILE, region.height - y) });
   const t0 = performance.now();
-  garden = new Garden({ width: region.width, height: region.height, open: region.open, root: region.root, heading: -Math.PI / 2, seed: seedIn.value, depth: layersIn.value === "depth" });
+  garden = new Garden({ width: region.width, height: region.height, open: region.open, root: region.root, heading: -Math.PI / 2, seed: seedIn.value, depth: layersIn.value.startsWith("depth"), gaps: layersIn.value.endsWith("gaps") });
   surface = new Surface({
     width: region.width, height: region.height, scale: dpr, tiles, paper: PAPER,
     canvas: (i, w, h) => {

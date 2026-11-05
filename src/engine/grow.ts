@@ -127,8 +127,9 @@ export function joint(r: Rng, p: Pt, ang: number, len: number, stem?: Joint): { 
 // stream `r`. Its whole blade must fit the field, overlapping what is
 // already placed by at most `overlap` of its width, and clear the text;
 // otherwise it shrinks, up to three times. Returns its painter, or
-// undefined. With `stem` the leaf blends into the stem at its joint.
-export function leaf(g: Space, r: Rng, p: Pt, ang: number, len: number, overlap: number, factor: (kind: string) => number, stem?: Joint): ((this: void, pt: Painter) => void) | undefined {
+// undefined. With `stem` the leaf blends into the stem at its joint; with
+// `gap` it keeps that much clean paper outside its edge (LeafOptions.gap).
+export function leaf(g: Space, r: Rng, p: Pt, ang: number, len: number, overlap: number, factor: (kind: string) => number, stem?: Joint, gap?: number): ((this: void, pt: Painter) => void) | undefined {
   const k = 1 - overlap;
   const o = L.options(r, len, ang, factor);
   const { at, base } = joint(r, p, ang, len, stem);
@@ -152,8 +153,10 @@ export function leaf(g: Space, r: Rng, p: Pt, ang: number, len: number, overlap:
       }
       return (pt) => {
         o.attach = at;
+        o.gap = gap;
         if (mate !== undefined) {
           mate[1].attach = at;
+          mate[1].gap = gap;
           L.leaf(pt, mate[2], base[0], base[1], mate[0], mate[1]);
         }
         L.leaf(pt, r, base[0], base[1], ang, o);

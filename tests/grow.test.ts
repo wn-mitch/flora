@@ -201,10 +201,24 @@ test("with depth some leaves and sprays lie behind the stems, and nothing else c
   const flat = grow(o).pieces, deep = grow({ ...o, depth: true }).pieces;
   assert.equal(digest(deep), digest(flat));
   const want: Record<string, number> = { leaf: Z.leaf, spray: Z.spray, bloom: Z.bloom, hero: Z.bloom, gilt: Z.bloom };
-  for (const p of flat) assert.ok(p.kind === "stem" ? p.z === Z.stem || p.z === Z.over : p.z === want[p.kind], `${p.kind} ${p.id} in layer ${p.z}`);
+  for (const p of flat) assert.ok(p.kind === "stem" ? p.z === Z.stem || p.z === Z.over || p.z === Z.lift : p.z === want[p.kind], `${p.kind} ${p.id} in layer ${p.z}`);
   for (const kind of ["leaf", "spray"]) {
     const all = deep.filter((p) => p.kind === kind), far = all.filter((p) => p.z === Z.far);
     assert.ok(far.length > 0 && far.length < all.length, `${far.length} of ${all.length} ${kind}s behind`);
   }
   assert.ok(deep.every((p) => p.z !== Z.far || p.kind === "leaf" || p.kind === "spray"));
+});
+
+test("gaps change nothing that grows, and with depth each stretch of stem lifts the paper behind it", () => {
+  const o = margin(1500, 9, { depth: true });
+  const bare = grow(o).pieces, gapped = grow({ ...o, gaps: true }).pieces;
+  const lifts = gapped.filter((p) => p.z === Z.lift);
+  assert.equal(digest(gapped.filter((p) => p.z !== Z.lift)), digest(bare));
+  const stems = new Map(gapped.filter((p) => p.kind === "stem" && p.z === Z.stem).map((p) => [p.id, p]));
+  assert.equal(lifts.length, stems.size);
+  for (const l of lifts) {
+    const s = stems.get(-l.id);
+    assert.ok(s !== undefined && s.start === l.start, `lift ${l.id} without its stretch of stem`);
+  }
+  assert.equal(grow({ ...margin(1500, 9), gaps: true }).pieces.filter((p) => p.z === Z.lift).length, 0);
 });

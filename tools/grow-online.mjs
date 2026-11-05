@@ -26,7 +26,7 @@ await build({ entryPoints: [join(root, "tools", "grow-online.page.ts")], bundle:
 const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>flora online</title>
 <style>body{margin:0;background:#f9f8f4;font:13px ui-sans-serif,system-ui;color:#333}#bar{position:sticky;top:0;z-index:2;background:#f9f8f4e8;padding:8px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #0001}#stage{position:relative;margin:16px}input{width:5em}</style>
 <div id="bar">seed <input id="seed"> shape <select id="shape"><option>pentominoes</option><option>margin</option></select>
-layers <select id="layers"><option>fixed</option><option>depth</option></select>
+layers <select id="layers"><option>fixed</option><option>fixed gaps</option><option>depth</option><option>depth gaps</option></select>
 ticks/frame <input id="speed" type="number" min="1" max="200"> <button id="play"></button> <button id="again">regrow</button> <span id="stats"></span></div>
 <div id="stage"></div><script type="module" src="/grow.js"></script>`;
 const server = createServer(async (req, res) => {

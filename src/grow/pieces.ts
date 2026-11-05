@@ -36,10 +36,11 @@ export interface Piece {
 // The layers pieces are painted in, back to front, as the engine paints a
 // page (compose.ts): what lies behind the stems, the stems, where one
 // strand passes over another, the sprays, the leaves, and the blooms with
-// the hero and gilt over all. Within a layer, pieces lie in the order
-// they are laid down.
-export const Z = { far: 0, stem: 1, over: 2, spray: 3, leaf: 4, bloom: 5 } as const;
-export const LAYERS = 6;
+// the hero and gilt over all; between what is behind and the stems, the
+// paper either side of each stem, which cuts only what is behind. Within a
+// layer, pieces lie in the order they are laid down.
+export const Z = { far: 0, lift: 1, stem: 2, over: 3, spray: 4, leaf: 5, bloom: 6 } as const;
+export const LAYERS = 7;
 
 // The layer a piece of `kind` is painted in, unless put elsewhere.
 export function zOf(kind: string): number {
@@ -117,6 +118,14 @@ export function over(pt: Painter, rng: Rng, pts: readonly Pt[], w: number, gap: 
   if (pts.length < 2) return;
   pt.lay([{ at: pts[0], along: pts, half: w / 2 + gap + 1 }], () => pt.fill(G.smooth(G.ribbon(pts, () => w / 2 + gap), true), PAL.paper, 1));
   stem(pt, rng, pts, w, w);
+}
+
+// Paper `gap` wide either side of a stem along `pts`, from full width w0
+// to w1, laid down as its ink runs.
+export function lift(pt: Painter, pts: readonly Pt[], w0: number, w1: number, gap: number): void {
+  if (pts.length < 2) return;
+  const half = (t: number) => (w0 + (w1 - w0) * t) / 2 + gap;
+  pt.lay([{ at: pts[0], along: pts, half: Math.max(w0, w1) / 2 + gap + 1 }], () => pt.fill(G.smooth(G.ribbon(pts, half), true), PAL.paper, 1));
 }
 
 // A leaf whose base sits at (x, y), heading `ang`, up to `len` long.

@@ -53,6 +53,10 @@ export interface GardenOptions {
   // behind (off: all in front, as the engine paints a page).
   readonly weave?: boolean;
   readonly depth?: boolean;
+  // Whether a leaf keeps a band of clean paper outside its edge, and a
+  // stem one either side where it passes in front of what is behind it,
+  // as a strand passing over another does.
+  readonly gaps?: boolean;
 }
 
 // Pt of growth shared among the tips each tick, and the most one takes.
@@ -66,6 +70,8 @@ const HERO_AFTER = 80;
 // The paper either side of a strand passing over another, pt; and the
 // share of leaves and of sprays put behind the stems, with depth.
 const OVER_GAP = 1.3, FAR_LEAF = 0.35, FAR_SPRAY = 0.5;
+// With gaps, the paper outside a leaf's edge, pt.
+const LEAF_GAP = 1.1;
 // How far what grows at a point may reach from it, pt: the longest leaf,
 // with room to spare.
 const REACH = 300;
@@ -324,6 +330,12 @@ export class Garden implements World {
       const id = this.nextId++;
       const rng = this.rng.fork("stem:" + id);
       this.add(P.pieceOf(this.ink, id, "stem", start, INK, pts[0], (pt) => P.stem(pt, rng, pts, tp.width(s0), tp.width(s1))));
+      // With gaps and depth, paper either side of it over what is behind.
+      if (this.o.gaps === true && this.o.depth === true) {
+        const w0 = tp.width(s0), w1 = tp.width(s1);
+        // Its stem's id, negated, so turning gaps on changes nothing that grows.
+        this.add(P.pieceOf(this.ink, -id, "stem", start, INK, pts[0], (pt) => P.lift(pt, pts, w0, w1, OVER_GAP), P.Z.lift));
+      }
       // When the ink reaches each cell of the stretch.
       for (let i = i0; i <= i1; i++) this.inked(tp.pts[i][0], tp.pts[i][1], start + (tp.arc[i] - s0) / INK);
       if (tp.order === 0 && this.o.weave !== false) this.over(tp, i0, i1, (i) => start + (tp.arc[i] - s0) / INK);
@@ -432,7 +444,7 @@ export class Garden implements World {
   leaf(p: Pt, ang: number, len: number): ((pt: Painter) => void) | undefined {
     if (!this.parts(p[0], p[1])) return undefined;
     // Leaves may grow across each other as far as the engine's do.
-    return EG.leaf(this.space, this.rng.fork("leaf:" + this.nextId++), p, ang, len, tune.COMPOSE.leaf_overlap, () => 1);
+    return EG.leaf(this.space, this.rng.fork("leaf:" + this.nextId++), p, ang, len, tune.COMPOSE.leaf_overlap, () => 1, undefined, this.o.gaps === true ? LEAF_GAP : undefined);
   }
   leafLength(): number {
     return Math.min(130, this.wide * 0.85) * tune.COMPOSE.leaf_size;

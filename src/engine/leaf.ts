@@ -81,6 +81,7 @@ export interface LeafOptions {
   sweep?: number;             // radians each lobe leans toward the tip at its crest
   striate?: boolean;          // a feather's fine veins
   attach?: Attachment;
+  gap?: number;               // pt of clean paper kept outside the edge, over the halo
 }
 
 // Half-width at fraction t of a leaf with options o, as a share of o.width,
@@ -316,11 +317,15 @@ export function haloRuns(poly: readonly Pt[], base: Pt, size: number): Pt[][] {
 // A soft paper-white halo just outside a blade's edge. On bare paper it
 // does not show; where the blade lies over a stem, a spray or another leaf,
 // it lifts what is beneath along the edge, so the blade reads as in front.
-// It is left off near the base, which joins its stem (attach).
-function halo(pt: Painter, poly: readonly Pt[], base: Pt, size: number): void {
+// It is left off near the base, which joins its stem (attach). With a
+// `gap`, a band that wide just outside the edge is paper outright, so what
+// passes under the blade stops short of it; the wash, painted after,
+// covers the band's inner half.
+function halo(pt: Painter, poly: readonly Pt[], base: Pt, size: number, gap?: number): void {
   const runs = haloRuns(poly, base, size).map((run) => G.smooth(run, false));
   if (runs.length === 0) return;
   for (const w of [3.4, 2.2, 1.2]) pt.strokeMany(runs, PAL.paper, w, 0.2);
+  if (gap !== undefined && gap > 0) pt.strokeMany(runs, PAL.paper, 2 * gap, 1);
 }
 
 // Where a leaf joins its stem: f, where it joins around the stem (1 on the
@@ -354,7 +359,7 @@ export function leaf(pt: Painter, rng: Rng, x: number, y: number, ang: number, o
   // joint with it.
   const half = reachFrom(spine, poly) + 4;
   const body = [{ along: spine, half, dur: LAYING.leaf_wash * size, wet: LAYING.leaf_wet * size }];
-  pt.lay(body, () => halo(pt, poly, spine[0], size));
+  pt.lay(body, () => halo(pt, poly, spine[0], size, o.gap));
   W.wash(pt, poly, {
     rng, size,
     sweep: { along: spine, half, body: LAYING.leaf_wash * size, wet: LAYING.leaf_wet * size, line: [LAYING.outline[0] * size, LAYING.outline[1] * size] },
