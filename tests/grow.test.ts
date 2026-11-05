@@ -329,3 +329,23 @@ test("stems end as they near the foot rather than run along it", () => {
     for (const l of g.stemLines) assert.ok(below(l, 40) < 45, `seed ${seed}: a stem from (${l[0].map((v) => v.toFixed(0))}) runs ${below(l, 40).toFixed(0)} pt along the foot`);
   }
 });
+
+// How far stem `pts` climbs back up above the lowest it has been, pt.
+function climb(pts: readonly Pt[]): number {
+  let lo = Infinity, most = 0;
+  for (const q of pts) {
+    lo = Math.min(lo, q[1]);
+    most = Math.max(most, q[1] - lo);
+  }
+  return most;
+}
+
+test("strands run down into a band where only stems run rather than loop back along its edge", () => {
+  // The home page's margins at two widths, the strip of pages two thirds down.
+  for (const W of [376, 776]) for (const seed of [81044420, 81044421]) {
+    const h = 5656, m = W - 30;
+    const { g } = grow({ width: W, height: h, open: [[0, 0, m, h]], stems: [[0, 1903, W, 2397]], root: [m * 0.75, h - 4], heading: -Math.PI / 2, seed, depth: true, gaps: true });
+    const strands = g.stemLines.filter((l) => Math.hypot(l[0][0] - m * 0.75, l[0][1] - (h - 4)) < 1);
+    for (const l of strands) assert.ok(climb(l) < 30, `width ${W} seed ${seed}: a strand climbs ${climb(l).toFixed(0)} pt back up`);
+  }
+});

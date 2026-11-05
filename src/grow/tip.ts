@@ -176,12 +176,13 @@ export class Tip {
     vx += px * 0.8;
     vy += py * 0.8;
     // With nothing near to draw it, the main stem seeks the nearest food by
-    // the open cells, every so often.
+    // the open cells, every so often; a twined strand keeps to its line
+    // instead, as food left beside or above it would only loop it back.
     let seeking = false;
     if (n > 0) this.lost = 0;
     if (n === 0 && this.main) {
       if (this.s >= this.seekAt) {
-        this.goal = w.seek(this.x, this.y);
+        this.goal = this.twine === undefined ? w.seek(this.x, this.y) : undefined;
         this.seekAt = this.s + 20;
       }
       // A strand twined with others hangs on down its line, as does any
